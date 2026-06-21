@@ -20,6 +20,23 @@ import {
 const WEAPON_IDS: WeaponId[] = ["rocket", "sideguns", "turret"];
 const WEAPON_LABELS: Record<WeaponId, string> = { rocket: "ROCKET", sideguns: "SIDEGUNS", turret: "TURRET" };
 
+// 11/12/13 stay "th" (not "1st"/"2nd"/"3rd") — the classic exception to the
+// last-digit rule.
+function ordinal(n: number): string {
+  const lastTwo = n % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
+}
+
 // Owns all HUD rendering: text readouts, the in-world weapon aim meter,
 // player/rival health bars, and the bottom-right weapon sidebar. GameScene
 // just feeds it per-frame state; all the drawing detail (sidegun dual-mount
@@ -64,7 +81,15 @@ export class HudSystem {
       .setDepth(DEPTHS.hud)
       .setScrollFactor(0);
     this.raceDebugText = scene.add
-      .text(CANVAS_WIDTH - 16, 16, "", { fontFamily: "monospace", fontSize: "13px", color: "#888888" })
+      .text(CANVAS_WIDTH - 16, 16, "", {
+        fontFamily: "monospace",
+        fontSize: "26px",
+        fontStyle: "bold",
+        color: "#ffd166",
+        stroke: "#000000",
+        strokeThickness: 4,
+        align: "right",
+      })
       .setOrigin(1, 0)
       .setDepth(DEPTHS.hud)
       .setScrollFactor(0);
@@ -119,7 +144,7 @@ export class HudSystem {
   }
 
   updateRaceDebugText(lapDisplay: number, lapsToWin: number, position: number, total: number): void {
-    this.raceDebugText.setText(`Lap ${lapDisplay}/${lapsToWin}  Pos ${position}/${total}`);
+    this.raceDebugText.setText(`${ordinal(position)}/${total}\nLap ${lapDisplay}/${lapsToWin}`);
   }
 
   getRaceDebugText(): string {

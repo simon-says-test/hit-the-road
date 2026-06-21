@@ -13,7 +13,9 @@ export class Pickup extends Phaser.Physics.Arcade.Image {
     scene.add.existing(this);
     scene.physics.add.existing(this);
     this.setDepth(DEPTHS.pickup);
-    this.setScale(0.6); // Scale to match other entities
+    // Bigger than the old 0.6 — at car scale, pickups were easy to miss
+    // entirely while driving past at speed.
+    this.setScale(0.9);
   }
 
   /**

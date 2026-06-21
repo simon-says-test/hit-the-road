@@ -151,7 +151,7 @@ export const ENEMY_ARCHETYPES: Record<EnemyArchetypeId, EnemyArchetypeConfig> = 
     id: "chaser",
     texture: "car-enemy-1",
     tint: 0xcc6655,
-    health: 45,
+    health: 55,
     speedMultiplier: 1.05,
     weight: 3,
     maxTurnRateDeg: 230,
@@ -167,7 +167,7 @@ export const ENEMY_ARCHETYPES: Record<EnemyArchetypeId, EnemyArchetypeConfig> = 
     id: "shooter",
     texture: "car-enemy-2",
     tint: 0xc9c977,
-    health: 60,
+    health: 75,
     speedMultiplier: 0.85,
     weight: 3,
     maxTurnRateDeg: 200,
@@ -183,7 +183,7 @@ export const ENEMY_ARCHETYPES: Record<EnemyArchetypeId, EnemyArchetypeConfig> = 
     id: "heavy",
     texture: "car-enemy-3",
     tint: 0x7a9466,
-    health: 160,
+    health: 190,
     speedMultiplier: 0.6,
     weight: 2,
     maxTurnRateDeg: 80,
@@ -199,7 +199,7 @@ export const ENEMY_ARCHETYPES: Record<EnemyArchetypeId, EnemyArchetypeConfig> = 
     id: "bomber",
     texture: "car-enemy-4",
     tint: 0xe28a44,
-    health: 24,
+    health: 30,
     speedMultiplier: 1.1,
     weight: 2,
     maxTurnRateDeg: 240,
@@ -267,11 +267,27 @@ export const RUBBER_BAND = {
 
 // The race is won by completing a fixed number of laps of the generated
 // loop, ranked by finishing order against the 5 rivals — not an endless
-// distance chase any more. Not yet consumed by GameScene (lap counting and
-// the finish condition land in Phase 2 of the loop-track rework), but
-// defined now so nothing still references the old distance-based field.
+// distance chase any more. See RaceTracker.hasPlayerFinished/playerLaps for
+// the win condition and GameScene.drawFinishLine for the visual line at the
+// s=0 lap boundary this checks against.
 export const TRACK = {
   lapsToWin: 3,
+};
+
+// A small health top-up for completing a lap — for the player and every
+// rival alike (see RaceTracker.playerLaps/RivalState.lastS for how each
+// car's own lap count is tracked) — clamped to each car's own max, so it's
+// a reward for surviving a lap rather than a way to exceed full health.
+export const LAP_HEALTH_BONUS = 15;
+
+// The checkered start/finish line painted across the road at s=0 (see
+// GameScene.drawFinishLine) — square-ish blocks alternating dark/light,
+// two rows deep so it reads as a checker flag rather than a single stripe.
+export const FINISH_LINE = {
+  squareSize: 24,
+  rows: 2,
+  darkColor: 0x111111,
+  lightColor: 0xf0f0f0,
 };
 
 // Enemy "AI": each rival's target heading blends (a) a lookahead point on
@@ -660,7 +676,11 @@ export const VISUAL_TINTS = {
   enemyBullet: 0xff3333,
   boostPickup: 0xffd166,
   healthPickup: 0x55ff77,
-  ammoPickup: 0x99aabb,
+  // Brighter cyan than the old muted grayish-blue, and rendered with the
+  // same additive blend as the other pickup types (see PickupSystem) — the
+  // old NORMAL-blend gray tint was the only pickup that didn't glow, making
+  // it the easiest of the three to miss against the road/ground colors.
+  ammoPickup: 0x66ddff,
 };
 
 // Procedurally drawn in BootScene (see ROAD_COLORS for the same pattern) —

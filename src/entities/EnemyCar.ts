@@ -93,6 +93,12 @@ export class EnemyCar extends Phaser.Physics.Arcade.Image {
     return this.health <= 0;
   }
 
+  // Lap-completion top-up (see LAP_HEALTH_BONUS) — clamped to the
+  // archetype's own max, same as PlayerCar.heal.
+  heal(amount: number): void {
+    this.health = Math.min(this.archetype.health, this.health + amount);
+  }
+
   // Called by GameScene whenever a discrete hit (weapon or ram damage)
   // didn't kill it — with enemy/player top speed now roughly at parity,
   // this is what actually opens a gap when you land a hit, rather than a

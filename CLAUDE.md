@@ -45,5 +45,5 @@ The `docs` folder contains specification documents (e.g. `specification.md`) des
 
 ## Performance
 
-- Consider which steps for solving issues are taking the most time and if there are consistent issues e.g. maybe testing is taking time then prompt me at the end with suggestions of how to improve. Only do this where performance is significant delay.
+- Consider which steps for solving issues are taking the most time and if there are consistent issues e.g. maybe testing is taking time then prompt developer at the end with suggestions of how to improve. Only do this where performance is significant delay.
 - When reproducing a reported bug via headless-browser instrumentation (e.g. the `playtest` skill), front-load a broad diagnostic snapshot (position, heading, health, game-over/win flags, etc.) on the first pass rather than adding fields reactively after each run — each run can cost real wall-clock time (browser launch + game boot + tens of seconds of simulated play), so under-instrumenting and re-running is far more expensive than capturing a few extra fields up front. Caught this after chasing a false lead for a whole iteration because an early snapshot omitted `health`/`gameOver`, which would have ruled it out immediately.

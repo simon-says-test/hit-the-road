@@ -1,6 +1,7 @@
-import { RUBBER_BAND, TRACK } from "../config";
+import { RUBBER_BAND, TRACK, LAP_HEALTH_BONUS } from "../config";
 import { Track, nearestPoint } from "../entities/track";
 import { EnemyCar } from "../entities/EnemyCar";
+import { PlayerCar } from "../entities/PlayerCar";
 
 // One persistent rival: its EnemyCar plus the race-progress bookkeeping
 // needed to compute lap counts and live position (see updateRival/
@@ -28,6 +29,11 @@ export interface RivalState {
   // re-derived each frame since the timer alone doesn't say which
   // direction triggered it.
   rubberBandMultiplier: number;
+  // Lap count as of the last applyLapHealthBonuses call — compared against
+  // the freshly computed lap count each frame so the health top-up fires
+  // once on the frame a lap actually rolls over, not every frame for the
+  // rest of the lap.
+  lastLap: number;
 }
 
 // Owns lap counting, live race position, and rubber-banding for the player
@@ -37,6 +43,7 @@ export class RaceTracker {
   private rivals: RivalState[] = [];
   private playerStartS = 0;
   private playerLastS = 0;
+  private lastPlayerLap = 0;
 
   constructor(private track: Track, private rng: () => number = Math.random) {}
 
@@ -46,11 +53,12 @@ export class RaceTracker {
   initializePlayer(x: number, y: number): void {
     this.playerStartS = nearestPoint(this.track, x, y).s;
     this.playerLastS = this.playerStartS;
+    this.lastPlayerLap = 0;
   }
 
   addRival(car: EnemyCar, x: number, y: number): void {
     const startS = nearestPoint(this.track, x, y).s;
-    this.rivals.push({ car, startS, lastS: startS, rubberBandTimer: 0, rubberBandMultiplier: 1 });
+    this.rivals.push({ car, startS, lastS: startS, rubberBandTimer: 0, rubberBandMultiplier: 1, lastLap: 0 });
   }
 
   getRivals(): RivalState[] {
@@ -82,6 +90,28 @@ export class RaceTracker {
 
   hasPlayerFinished(): boolean {
     return this.playerLaps() >= TRACK.lapsToWin;
+  }
+
+  // Tops up the player's and every rival's health by LAP_HEALTH_BONUS the
+  // frame their own lap count rolls over — call once per frame, after
+  // updatePlayerS/updateRival have already moved lastS for this frame.
+  // Heals are clamped to each car's own max (PlayerCar.heal/EnemyCar.heal),
+  // so this is a survival reward, not a way to bank health above full.
+  applyLapHealthBonuses(player: PlayerCar): void {
+    const currentPlayerLap = this.playerLaps();
+    if (currentPlayerLap > this.lastPlayerLap) {
+      player.heal(LAP_HEALTH_BONUS);
+      this.lastPlayerLap = currentPlayerLap;
+    }
+
+    for (const rival of this.rivals) {
+      if (!rival.car.active) continue;
+      const currentLap = Math.floor((rival.lastS - rival.startS) / this.track.totalLength);
+      if (currentLap > rival.lastLap) {
+        rival.car.heal(LAP_HEALTH_BONUS);
+        rival.lastLap = currentLap;
+      }
+    }
   }
 
   // Updates one rival's tracked position and rubber-band state for this

@@ -71,14 +71,15 @@ export class PickupSystem {
     if (!pickup) return;
     pickup.spawn(type, x, y, texture, weaponType);
 
+    // All three glow via additive blend now — ammo used to be the lone
+    // NORMAL-blend, muted-gray pickup, which made it the easiest of the
+    // three to miss against the road/ground colors (see VISUAL_TINTS).
+    pickup.setBlendMode(Phaser.BlendModes.ADD);
     if (type === "health") {
-      pickup.setBlendMode(Phaser.BlendModes.ADD);
       pickup.setTint(VISUAL_TINTS.healthPickup);
     } else if (type === "ammo") {
-      pickup.setBlendMode(Phaser.BlendModes.NORMAL);
       pickup.setTint(VISUAL_TINTS.ammoPickup);
     } else {
-      pickup.setBlendMode(Phaser.BlendModes.ADD);
       pickup.setTint(VISUAL_TINTS.boostPickup);
     }
   }

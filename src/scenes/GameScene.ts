@@ -39,6 +39,7 @@ import {
   HAZARDS,
   OBSTACLES,
   OIL_SLICK,
+  FINISH_LINE,
 } from "../config";
 
 const HIGH_SCORE_STORAGE_KEY = "hit-the-road:best-distance";
@@ -299,6 +300,50 @@ export class GameScene extends Phaser.Scene {
         );
       }
     }
+
+    this.drawFinishLine(g, track);
+  }
+
+  // A checkered start/finish line painted across the road at s=0, the same
+  // point lap counting treats as the loop boundary (see RaceTracker) —
+  // painted last into the shared track Graphics object so it sits on top
+  // of the road fill it's drawn over. Squares alternate in both directions
+  // (row + column parity) for a real checker-flag look rather than a single
+  // stripe, sized in world px via FINISH_LINE so it scales with the road.
+  private drawFinishLine(g: Phaser.GameObjects.Graphics, track: Track): void {
+    const origin = pointAt(track, 0);
+    const fx = Math.sin(origin.headingRad);
+    const fy = -Math.cos(origin.headingRad);
+    const nx = Math.cos(origin.headingRad);
+    const ny = Math.sin(origin.headingRad);
+
+    const { squareSize, rows, darkColor, lightColor } = FINISH_LINE;
+    const columns = Math.ceil((track.pavedHalfWidth * 2) / squareSize);
+    const rowStart = -(rows * squareSize) / 2;
+    const colStart = -track.pavedHalfWidth;
+
+    for (let row = 0; row < rows; row++) {
+      const along0 = rowStart + row * squareSize;
+      const along1 = along0 + squareSize;
+      for (let col = 0; col < columns; col++) {
+        const lateral0 = colStart + col * squareSize;
+        const lateral1 = Math.min(lateral0 + squareSize, track.pavedHalfWidth);
+        if (lateral1 <= lateral0) continue;
+
+        const corners = [
+          { along: along0, lateral: lateral0 },
+          { along: along0, lateral: lateral1 },
+          { along: along1, lateral: lateral1 },
+          { along: along1, lateral: lateral0 },
+        ].map(({ along, lateral }) => ({
+          x: origin.x + fx * along + nx * lateral,
+          y: origin.y + fy * along + ny * lateral,
+        }));
+
+        g.fillStyle((row + col) % 2 === 0 ? darkColor : lightColor, 1);
+        g.fillPoints(corners, true);
+      }
+    }
   }
 
   private sideEdges(
@@ -373,6 +418,7 @@ export class GameScene extends Phaser.Scene {
     this.distanceTraveled += ((Math.max(0, forwardSpeed) * delta) / 1000 / SCORE_DISTANCE_DIVISOR) * this.pickupSystem.getScoreMultiplier();
 
     this.updateRivals(delta);
+    this.raceTracker.applyLapHealthBonuses(this.player);
     this.hud.updateText(this.player, this.distanceTraveled, forwardSpeed);
     this.hud.drawWeaponMeter(this.player);
     this.hud.drawHealthBars(this.player, this.raceTracker.getRivals());
