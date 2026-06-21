@@ -4,9 +4,11 @@
 
 ## Context
 
-For every session, you should start by reading the project context at `.claude/context.md` - this should help you understand the solution and reduce the number of files you have to read to perform sensible edits. You must decide when ti is approrpiate to read more context however: for example, a large refactor will likely need exact file content.
+@.claude/context.md
 
-After a code chage, quickly check the context to see if it need updating to keep it fresh and do so if necessary.
+The above is auto-loaded every session (Claude Code's `@path` import syntax) so it never needs an explicit read — it's a condensed map of the codebase to reduce how many files you have to read to perform sensible edits. You must still decide when it's appropriate to read more context: a large refactor will likely need exact file content, not just the summary.
+
+After a code change, quickly check the context to see if it needs updating to keep it fresh, and do so if necessary.
 
 ## Specification
 
