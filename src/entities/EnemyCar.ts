@@ -170,7 +170,11 @@ export class EnemyCar extends Phaser.Physics.Arcade.Image {
     // speed the wall penalty has already reduced it to.
     const ownSpeedBeforeWall =
       baseApproachSpeed * this.archetype.speedMultiplier * rubberBandMultiplier * damageSlowMultiplier * roughTerrainMultiplier * curveFactor;
-    const ownSpeed = ownSpeedBeforeWall * wallMultiplier;
+    // One-time impact cut on the same rising edge as the one-time damage
+    // below, on top of (not instead of) wallMultiplier's continuous
+    // scraping drag — see PlayerCar.drive's equivalent.
+    const wallImpactMultiplier = atWall && !this.wasAtWall ? WALLS.impactSpeedPenaltyFactor : 1;
+    const ownSpeed = ownSpeedBeforeWall * wallMultiplier * wallImpactMultiplier;
 
     const headingRad = (this.heading * Math.PI) / 180;
     // Oil drift biases actual travel direction away from heading (a fixed

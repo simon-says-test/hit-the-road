@@ -22,6 +22,8 @@ import { HudSystem } from "../systems/HudSystem";
 import { InputHandler } from "../systems/InputHandler";
 import { CollisionHandler } from "../systems/CollisionHandler";
 import { PickupSystem } from "../systems/PickupSystem";
+import { TouchControls } from "../systems/TouchControls";
+import { isMobileMode } from "../utils/device";
 import {
   SCORE_DISTANCE_DIVISOR,
   WEAPON_VISUALS,
@@ -40,6 +42,8 @@ import {
   OBSTACLES,
   OIL_SLICK,
   FINISH_LINE,
+  PLAYER_HANDLING,
+  CAMERA,
 } from "../config";
 
 const HIGH_SCORE_STORAGE_KEY = "hit-the-road:best-distance";
@@ -69,6 +73,12 @@ export class GameScene extends Phaser.Scene {
   private inputHandler!: InputHandler;
   private collisionHandler!: CollisionHandler;
   private pickupSystem!: PickupSystem;
+  private touchControls!: TouchControls;
+
+  // Smoothed look-ahead camera offset (see update()'s camera section) —
+  // lerped toward a target each frame rather than snapping, the same
+  // ease-toward-target idea the camera's own follow damping uses.
+  private cameraLookAhead = { x: 0, y: 0 };
 
   // Every Math.random() call in this scene goes through this instead — see
   // getSeedFromUrl for why.
@@ -107,6 +117,7 @@ export class GameScene extends Phaser.Scene {
     this.onRoughTerrain = false;
     this.oilSlickTimer = 0;
     this.oilDriftBias = 0;
+    this.cameraLookAhead = { x: 0, y: 0 };
     this.highScore = Number(localStorage.getItem(HIGH_SCORE_STORAGE_KEY) ?? 0);
 
     this.rng = this.getSeedFromUrl() ?? Math.random;
@@ -122,6 +133,10 @@ export class GameScene extends Phaser.Scene {
     this.physics.world.setBounds(bounds.minX, bounds.minY, bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
     this.cameras.main.setBounds(bounds.minX, bounds.minY, bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
     this.cameras.main.startFollow(this.player, true, 0.15, 0.15);
+    // Zoomed out a bit further on mobile, whose smaller/touch-occluded
+    // screen needs more margin to read an upcoming bend in time — see
+    // update()'s look-ahead offset for the heading/speed-based half of this.
+    this.cameras.main.setZoom(isMobileMode() ? CAMERA.mobileZoom : CAMERA.zoom);
 
     this.raceTracker = new RaceTracker(this.track, this.rng);
     this.raceTracker.initializePlayer(this.player.x, this.player.y);
@@ -141,6 +156,7 @@ export class GameScene extends Phaser.Scene {
     this.collisionHandler = new CollisionHandler();
     this.hud = new HudSystem(this, this.highScore);
     this.inputHandler = new InputHandler(this, (weapon) => this.player.selectWeapon(weapon));
+    this.touchControls = new TouchControls(this, (weapon) => this.player.selectWeapon(weapon));
 
     // Player vs. enemies is a *collider*, not an overlap — Arcade Physics
     // then physically separates the two bodies every step they touch, on
@@ -408,11 +424,22 @@ export class GameScene extends Phaser.Scene {
       leftWallDist: wallDist.leftWallDist,
       rightWallDist: wallDist.rightWallDist,
     });
+    // OR-combine with the virtual joystick the same way InputHandler already
+    // OR-combines WASD with the arrow keys — touch and keyboard are just two
+    // alternate sources for the same booleans, not a separate input model.
+    const touchMove = this.touchControls.getMoveInput();
+    input.accelerate ||= touchMove.accelerate;
+    input.brake ||= touchMove.brake;
+    input.left ||= touchMove.left;
+    input.right ||= touchMove.right;
+
     const forwardSpeed = this.player.drive(input, delta);
     if (this.oilSlickTimer > 0) this.oilSlickTimer -= delta;
     this.raceTracker.updatePlayerS(trackQuery.s);
 
     this.handleFiring();
+    this.touchControls.update(this.player.weapons.current);
+    this.updateCameraLookAhead(forwardSpeed, delta);
 
     this.pickupSystem.update(delta);
     this.distanceTraveled += ((Math.max(0, forwardSpeed) * delta) / 1000 / SCORE_DISTANCE_DIVISOR) * this.pickupSystem.getScoreMultiplier();
@@ -420,7 +447,7 @@ export class GameScene extends Phaser.Scene {
     this.updateRivals(delta);
     this.raceTracker.applyLapHealthBonuses(this.player);
     this.hud.updateText(this.player, this.distanceTraveled, forwardSpeed);
-    this.hud.drawWeaponMeter(this.player);
+    this.hud.drawWeaponMeter(this.player, this.touchControls.getTurretAimPointer() ?? this.input.activePointer);
     this.hud.drawHealthBars(this.player, this.raceTracker.getRivals());
     this.hud.updateWeaponSidebar(this.player);
     this.updateProjectiles();
@@ -570,13 +597,44 @@ export class GameScene extends Phaser.Scene {
 
   private handleFiring(): void {
     const weapon = this.player.weapons.current;
-    const pointer = this.input.activePointer;
-    const wantsFire = weapon === "turret" ? pointer.isDown : this.inputHandler.isFirePressed();
-    if (!wantsFire) return;
+    if (weapon === "turret") {
+      // Resolved through TouchControls rather than reading
+      // this.input.activePointer directly — on mobile that's whichever
+      // non-joystick finger is down outside the UI (so a tap can aim+fire
+      // even while the other thumb is still on the joystick); on desktop
+      // it's the mouse, unless it's hovering the weapon sidebar.
+      const pointer = this.touchControls.getTurretAimPointer();
+      if (!pointer) return;
+      const turretAimDeg = this.computeTurretAimDeg(pointer);
+      const shot = this.player.tryFire(turretAimDeg);
+      if (shot) this.spawnPlayerProjectile(shot);
+      return;
+    }
 
-    const turretAimDeg = this.computeTurretAimDeg(pointer);
-    const shot = this.player.tryFire(turretAimDeg);
+    const wantsFire = this.inputHandler.isFirePressed() || this.touchControls.isFireButtonHeld();
+    if (!wantsFire) return;
+    const shot = this.player.tryFire();
     if (shot) this.spawnPlayerProjectile(shot);
+  }
+
+  // Biases the camera's follow target toward wherever the player is
+  // currently heading, scaled by current speed (stationary/slow = no bias,
+  // flat-out = full CAMERA.lookAheadMaxPx) and smoothed via
+  // CAMERA.lookAheadLerp so it eases rather than snaps as heading/speed
+  // change. Phaser's Camera.setFollowOffset(x, y) centers the view on
+  // (target.x - x, target.y - y), so the offset passed in is the *negative*
+  // of the desired look-ahead vector — shifting the camera's center ahead
+  // of the player puts more of the upcoming road in view, with the player
+  // riding nearer the trailing edge of the screen.
+  private updateCameraLookAhead(forwardSpeed: number, delta: number): void {
+    const headingRad = (this.player.heading * Math.PI) / 180;
+    const speedFraction = Math.min(1, Math.abs(forwardSpeed) / PLAYER_HANDLING.maxForwardSpeed);
+    const targetX = Math.sin(headingRad) * CAMERA.lookAheadMaxPx * speedFraction;
+    const targetY = -Math.cos(headingRad) * CAMERA.lookAheadMaxPx * speedFraction;
+    const ease = 1 - Math.pow(1 - CAMERA.lookAheadLerp, delta / 16.67);
+    this.cameraLookAhead.x += (targetX - this.cameraLookAhead.x) * ease;
+    this.cameraLookAhead.y += (targetY - this.cameraLookAhead.y) * ease;
+    this.cameras.main.setFollowOffset(-this.cameraLookAhead.x, -this.cameraLookAhead.y);
   }
 
   // Turret aim is absolute (aimed directly at the world position under the

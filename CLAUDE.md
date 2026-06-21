@@ -2,13 +2,19 @@
 
 2D top-down driving game: TypeScript + Vite + Phaser 3. This is an early, minimal build — expect it to grow into a more sophisticated game (more enemy types, power-ups, levels, etc.), so favor structure that scales over the current flat style.
 
+## Context
+
+For every session, you should start by reading the project context at `.claude/context.md` - this should help you understand the solution and reduce the number of files you have to read to perform sensible edits. You must decide when ti is approrpiate to read more context however: for example, a large refactor will likely need exact file content.
+
+After a code chage, quickly check the context to see if it need updating to keep it fresh and do so if necessary.
+
 ## Specification
 
 The `docs` folder contains specification documents (e.g. `specification.md`) describing intended gameplay, controls, and features. Code and spec must be kept in sync in both directions: if you change behavior in code, update the spec to match in the same change; if the spec is edited — by you or by the user — to describe new or changed behavior, treat that as a task to implement in code, not just documentation, and call out explicitly if you're updating the spec without implementing it yet (or vice versa). If you notice the two have already drifted apart, flag the mismatch rather than silently picking one side.
 
 ## Assets
 
-- Loaded image/audio assets are allowed — this project no longer requires staying purely procedural. Prefer one coherent, consistently-licensed pack (e.g. CC0) over mixing sources with different art styles/resolutions; visual consistency matters more than using every available source.
+- Loaded image/audio assets are allowed. Prefer one coherent, consistently-licensed pack (e.g. CC0) over mixing sources with different art styles/resolutions; visual consistency matters more than using every available source.
 - Keep the existing separation regardless of source: gameplay scenes and entities (`GameScene.ts`, `PlayerCar.ts`, etc.) should only ever reference texture/sound keys, never load or generate art/audio themselves. `BootScene.ts` remains the single place that does so — via `this.load.image()`/`this.load.audio()` for loaded assets, or `Graphics.generateTexture()`/runtime synthesis for anything still generated procedurally (placeholders, quick prototyping, simple UI/VFX not worth sourcing).
 - Store loaded asset files under `public/assets/` so Vite serves them as static files, referenced by path from `BootScene.preload()`.
 - Track license/attribution requirements for anything that isn't CC0/public domain (e.g. a `CREDITS.md`).
@@ -30,8 +36,9 @@ The `docs` folder contains specification documents (e.g. `specification.md`) des
 ## Testing
 
 - Use Vitest for unit tests (TS-native, shares the Vite config/transform pipeline). Add tests for extracted pure logic — entity movement/handling math, AI behaviors, weapon aim/fire math, scoring/difficulty curve — as that logic lands in `src/entities/`/`src/config.ts`, rather than deferring indefinitely.
-- For Phaser scene wiring/behavior that reduces to checkable game state (lap counts, health, position, ammo, hazard counts, race outcomes), add an E2E test in `e2e/tests/` (`npm run test:e2e`) against `window.__GAME_STATE__` (see `GameScene.updateE2EGameState()`) rather than only re-verifying it by hand — this is a real regression suite, not a one-off check, so prefer expanding it over writing a throwaway script when the thing being verified is something a future change could plausibly break again. Use `?seed=` for anything position/layout-dependent so assertions don't flake.
-- Pure visual/alignment things that don't reduce to state (does the meter line up with the sprite, does a color read correctly) still aren't worth unit- or E2E-testing — verify those by running `npm run dev`, or the `playtest` skill for a quick scripted/headless visual check, and playing through the affected behavior plus any new feature's edge cases.
+- Don't run any visual test without prompt confirming as they takle too long:
+  - For Phaser scene wiring/behavior that reduces to checkable game state (lap counts, health, position, ammo, hazard counts, race outcomes), add an E2E test in `e2e/tests/` (`npm run test:e2e`) against `window.__GAME_STATE__` (see `GameScene.updateE2EGameState()`) rather than only re-verifying it by hand — this is a real regression suite, not a one-off check, so prefer expanding it over writing a throwaway script when the thing being verified is something a future change could plausibly break again. Use `?seed=` for anything position/layout-dependent so assertions don't flake.
+  - Pure visual/alignment things that don't reduce to state (does the meter line up with the sprite, does a color read correctly) still aren't worth unit- or E2E-testing — verify those by running `npm run dev`, or the `playtest` skill for a quick scripted/headless visual check, and playing through the affected behavior plus any new feature's edge cases.
 
 ## Troubleshooting
 

@@ -126,10 +126,18 @@ export class PlayerCar extends Phaser.Physics.Arcade.Image {
     if (this._isOffRoad) {
       this.takeDamage(PLAYER_HEALTH.offroadDamagePerSecond * (delta / 1000));
     }
-    // One-time damage on the frame contact begins, not per second of
-    // continued contact — see wallImpactDamage in config.ts.
+    // One-time damage + speed cut on the frame contact begins, not per
+    // second of continued contact — see wallImpactDamage in config.ts. The
+    // speed cut applies on top of (not instead of) the wall's own continuous
+    // scraping drag, since a real impact happens in the instant of contact.
     if (result.atWall && !this._wasAtWall) {
       this.takeDamage(wallImpactDamage(speedEnteringFrame, WALLS.maxImpactDamagePlayer, PLAYER_HANDLING.maxForwardSpeed));
+      this.driveState.forwardSpeed *= WALLS.impactSpeedPenaltyFactor;
+      // Re-applied immediately (not left for next frame's drive() to pick
+      // up) so the slowdown reads as instant on the frame of impact, the
+      // same as applyObstacleHit's one-time speed multiply.
+      const velocityHeadingRad = (this.driveState.velocityHeadingDeg * Math.PI) / 180;
+      this.setVelocity(Math.sin(velocityHeadingRad) * this.driveState.forwardSpeed, -Math.cos(velocityHeadingRad) * this.driveState.forwardSpeed);
     }
     this._wasAtWall = result.atWall;
 

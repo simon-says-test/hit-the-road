@@ -15,6 +15,7 @@ import {
   PLAYER_HEALTH,
   WEAPONS,
   WeaponId,
+  weaponSidebarRowRect,
 } from "../config";
 
 const WEAPON_IDS: WeaponId[] = ["rocket", "sideguns", "turret"];
@@ -55,7 +56,7 @@ export class HudSystem {
   private sidebarReloadBars: Phaser.GameObjects.Graphics;
   private sidebarAmmoTexts: Record<WeaponId, Phaser.GameObjects.Text>;
 
-  constructor(private scene: Phaser.Scene, highScore: number) {
+  constructor(scene: Phaser.Scene, highScore: number) {
     this.healthText = scene.add
       .text(16, 16, "Health: 100", { fontFamily: "monospace", fontSize: "18px", color: "#ffffff" })
       .setDepth(DEPTHS.hud)
@@ -159,7 +160,7 @@ export class HudSystem {
     return { x: cx + Math.cos(rad) * radius, y: cy + Math.sin(rad) * radius };
   }
 
-  drawWeaponMeter(player: PlayerCar): void {
+  drawWeaponMeter(player: PlayerCar, aimPointer: Phaser.Input.Pointer): void {
     const g = this.weaponMeter;
     g.clear();
 
@@ -207,16 +208,17 @@ export class HudSystem {
       g.fillStyle(visuals.meterColor, 1).fillCircle(tip.x, tip.y, 3);
 
       // Turret aim follows the mouse/pointer with no other on-screen cursor
-      // of its own — draw a crosshair at the pointer's world position so
-      // it's clear exactly where a shot would land.
-      const pointer = this.scene.input.activePointer;
+      // of its own — draw a crosshair at the aim pointer's world position
+      // so it's clear exactly where a shot would land. GameScene resolves
+      // which pointer that is (see TouchControls.getTurretAimPointer) so
+      // this stays correct under multi-touch, not just the plain mouse.
       g.lineStyle(2, visuals.meterColor, 0.8);
-      g.strokeCircle(pointer.worldX, pointer.worldY, 8);
+      g.strokeCircle(aimPointer.worldX, aimPointer.worldY, 8);
       g.beginPath();
-      g.moveTo(pointer.worldX - 12, pointer.worldY);
-      g.lineTo(pointer.worldX + 12, pointer.worldY);
-      g.moveTo(pointer.worldX, pointer.worldY - 12);
-      g.lineTo(pointer.worldX, pointer.worldY + 12);
+      g.moveTo(aimPointer.worldX - 12, aimPointer.worldY);
+      g.lineTo(aimPointer.worldX + 12, aimPointer.worldY);
+      g.moveTo(aimPointer.worldX, aimPointer.worldY - 12);
+      g.lineTo(aimPointer.worldX, aimPointer.worldY + 12);
       g.strokePath();
     }
   }
@@ -267,7 +269,7 @@ export class HudSystem {
     const g = this.weaponSidebarHighlight;
     g.clear();
     const idx = WEAPON_IDS.indexOf(player.weapons.current);
-    const y = WEAPON_SIDEBAR.yStart + idx * WEAPON_SIDEBAR.rowHeight - 6;
-    g.fillStyle(0xffffff, 0.15).fillRect(WEAPON_SIDEBAR.x - 6, y, WEAPON_SIDEBAR.reloadBarWidth + 56, WEAPON_SIDEBAR.rowHeight - 10);
+    const rect = weaponSidebarRowRect(idx);
+    g.fillStyle(0xffffff, 0.15).fillRect(rect.x, rect.y, rect.width, rect.height);
   }
 }

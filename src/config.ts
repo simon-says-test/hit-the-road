@@ -435,6 +435,54 @@ export const WEAPON_SIDEBAR = {
   reloadBarHeight: 6,
 };
 
+// Shared by HudSystem's per-frame selected-row highlight and TouchControls'
+// tap-to-switch hit-testing — one source of truth for the row rect so a tap
+// always lands exactly where the highlight is drawn.
+export function weaponSidebarRowRect(index: number): { x: number; y: number; width: number; height: number } {
+  return {
+    x: WEAPON_SIDEBAR.x - 6,
+    y: WEAPON_SIDEBAR.yStart + index * WEAPON_SIDEBAR.rowHeight - 6,
+    width: WEAPON_SIDEBAR.reloadBarWidth + 56,
+    height: WEAPON_SIDEBAR.rowHeight - 10,
+  };
+}
+
+// Fixed-position virtual joystick (bottom-left) and fire button (bottom-
+// right, clear of the weapon sidebar's footprint) shown only when
+// isMobileMode() — see utils/device.ts and systems/TouchControls.ts.
+export const MOBILE_CONTROLS = {
+  joystickBaseX: 110,
+  joystickBaseY: CANVAS_HEIGHT - 110,
+  joystickRadius: 60,
+  joystickThumbRadius: 28,
+  // Fraction of joystickRadius the thumb must be dragged past before it
+  // registers as accelerate/brake/left/right — keeps small thumb jitter
+  // from reading as constant input.
+  joystickDeadzone: 0.35,
+  fireButtonX: 700,
+  fireButtonY: CANVAS_HEIGHT - 90,
+  fireButtonRadius: 48,
+  baseAlpha: 0.3,
+  activeAlpha: 0.55,
+};
+
+// Camera follow zoom + look-ahead, applied on both desktop and mobile (see
+// GameScene.create()/update()) — zooming out and biasing the view toward
+// wherever the player is currently heading gives more time to react to an
+// upcoming bend than a plain centered follow. Mobile gets an extra zoom-out
+// on top of the shared baseline, since its smaller/touch-occluded screen
+// needs more margin to read the road in time.
+export const CAMERA = {
+  zoom: 0.92,
+  mobileZoom: 0.78,
+  lookAheadMaxPx: 90,
+  // Smoothing factor (0-1, higher = snappier) applied each frame toward the
+  // target look-ahead offset, the same lerp-toward-target idea as the
+  // camera's own follow damping, so the offset eases rather than snaps as
+  // speed/heading change.
+  lookAheadLerp: 0.08,
+};
+
 export const SIDE_GUN_SWEEP = {
   periodMs: 1400,
   maxAngleDeg: 40,
@@ -491,10 +539,14 @@ export const PICKUPS = {
 // separation every step — which is what made the bounce-apart feel
 // inconsistent (sometimes the cars visibly separated, sometimes they didn't)
 // rather than reliable.
+// speedFactor/minShunt raised and ramDamageFactor lowered from an initial
+// 0.4/30/0.08 — playtesting feedback was that a ram read more like a number
+// changing than a physical hit; trading a bit of ram damage for a bigger,
+// more reliable speed jolt is what actually sells the impact.
 export const COLLISION_SHUNT = {
-  speedFactor: 0.4,
-  minShunt: 30,
-  ramDamageFactor: 0.08,
+  speedFactor: 0.55,
+  minShunt: 45,
+  ramDamageFactor: 0.06,
   ramCooldownMs: 500,
   recoilSpeed: 160,
 };
@@ -544,14 +596,17 @@ export const HAZARDS = {
 // "physical obstacle you clip" read the old debris/barrier model had before
 // the rough-terrain/oil-slick rework, now as a third hazard type alongside
 // (not instead of) the continuous patches.
+// Bigger (size 30->44) and a harder one-time speed cut, trading some of the
+// old flat damage for it (12->8, 0.5->0.32 speedPenaltyFactor) — playtesting
+// found the old small rock barely registered as a real obstacle.
 export const OBSTACLES = {
   count: 6,
-  size: 30,
-  damage: 12,
+  size: 44,
+  damage: 8,
   // One-time multiply applied to current speed on contact (player) or to
   // that frame's ownSpeed (enemy) — a hard bump should cost real speed, not
   // just a glancing scrape.
-  speedPenaltyFactor: 0.5,
+  speedPenaltyFactor: 0.32,
 };
 
 export const ROUGH_TERRAIN = {
@@ -615,11 +670,16 @@ export const WALLS = {
   minImpactSpeed: 150,
   // Damage dealt for an impact at or above each car's own max speed; scales
   // linearly down to 0 at minImpactSpeed (see wallImpactDamage). Lowered
-  // from the old continuous drain's effective per-hit cost after
-  // playtesting — a single bad clip shouldn't chew through most of the
-  // player's health, even at top speed.
-  maxImpactDamagePlayer: 22,
-  maxImpactDamageEnemy: 35,
+  // again (22->16, 35->26) alongside adding impactSpeedPenaltyFactor below —
+  // a wall clip now costs more speed and a bit less health than before.
+  maxImpactDamagePlayer: 16,
+  maxImpactDamageEnemy: 26,
+  // One-time multiply applied to current/own speed on the same rising edge
+  // as the one-time damage above (see PlayerCar.drive/EnemyCar.drive) — on
+  // top of (not instead of) the continuous scraping drag, since a real
+  // impact happens in the instant of contact, not over the following second
+  // of sliding along it.
+  impactSpeedPenaltyFactor: 0.65,
   enemySpeedMultiplier: 0.4,
   // Clearly darker/more saturated than ROAD_COLORS.ground (0x4a4636) — an
   // earlier pass used a much closer tone (0x554a3c) that was technically
