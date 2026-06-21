@@ -9,14 +9,14 @@ Condensed map of the codebase for fast orientation at session start, so explorat
 
 ## Stack
 
-TypeScript 5.5 (strict, `noUnusedLocals`/`noUnusedParameters`, ES2020 target) + Vite 5.4 + Phaser 3.80 (Arcade Physics). No other runtime deps. 2D top-down vehicular-combat racer, closed-loop procedural track, 960×600 fixed logical canvas (`CANVAS_WIDTH`/`CANVAS_HEIGHT` in `config.ts`), `Scale.FIT` letterboxes it to any real viewport.
+TypeScript 5.5 (strict, `noUnusedLocals`/`noUnusedParameters`, ES2020 target) + Vite 5.4 + Phaser 3.80 (Arcade Physics). No other runtime deps. 2D top-down vehicular-combat racer, closed-loop procedural track. Fixed logical canvas, but **two sizes**: 960×600 landscape on desktop (`CANVAS_WIDTH`/`CANVAS_HEIGHT`), 600×960 portrait on mobile (`MOBILE_CANVAS_WIDTH`/`MOBILE_CANVAS_HEIGHT`) — `main.ts` picks between them via `isMobileMode()` at boot. `Scale.FIT` letterboxes whichever one to the real viewport. **Layout code should read `scene.scale.width/height`, not import a static constant** — see the convention bullet below, it's an easy trap.
 
 ## File map (one-liner per file)
 
 ```text
 src/
-  main.ts                 — Phaser.Game config: scale (FIT/CENTER_BOTH), input.activePointers, scene list
-  config.ts                — ALL tunable numbers + a few pure helper fns (wallImpactDamage, weaponSidebarRowRect, nextCrateIntervalMs). Check here first for "what's the current value of X."
+  main.ts                 — Phaser.Game config: scale (FIT/CENTER_BOTH), input.activePointers, scene list; ONLY place that calls isMobileMode() to pick the desktop vs. mobile canvas size
+  config.ts                — ALL tunable numbers + a few pure helper fns (wallImpactDamage, weaponSidebarRowRect, sidebarOrigin, nextCrateIntervalMs). Check here first for "what's the current value of X."
   utils/
     device.ts               — isMobileMode() touch-capability auto-detect (+ ?mobile=1/0 override)
     cameraLayers.ts          — ignoreInUiCamera(scene, obj): excludes a world object from GameScene.uiCamera (see Camera/UI-camera section below)
@@ -39,8 +39,8 @@ src/
     BootScene.ts             — loads art/audio, procedurally draws hazard-patch/obstacle textures (road itself is drawn fresh per-race, not pre-baked)
     IntroScene.ts             — one-time controls screen → GameScene
     GameScene.ts              — orchestrates everything: spawns, per-frame update, firing, collisions, camera, game-over/finish. Reads config + delegates to systems/.
-e2e/tests/core.spec.ts      — Playwright, asserts against window.__GAME_STATE__ (keyboard/mouse, default desktop viewport)
-e2e/tests/mobile.spec.ts    — Playwright, touch-emulated (test.use({hasTouch:true, viewport:960x600})), exercises TouchControls
+e2e/tests/core.spec.ts      — Playwright, asserts against window.__GAME_STATE__ (keyboard/mouse, default desktop viewport, 960x600 landscape)
+e2e/tests/mobile.spec.ts    — Playwright, touch-emulated (test.use({hasTouch:true, viewport:600x960})), exercises TouchControls against the portrait mobile canvas
 scripts/setup-headless-chromium.sh — fixes headless Chromium for this sandboxed/no-sudo environment (see Testing below)
 ```
 
@@ -55,15 +55,20 @@ scripts/setup-headless-chromium.sh — fixes headless Chromium for this sandboxe
 - **`src/systems/`** is for scene-level cross-cutting orchestration (HUD, input, collision math, pickups) constructed once in `GameScene.create()` — extract a new one once a second instance of a concern shows up, same reasoning as the archetype/weapon data-over-subclass pattern.
 - **Asset loading is BootScene-only** — gameplay/entity/scene code references texture/sound keys, never loads or generates art itself (procedural placeholders via `Graphics.generateTexture()` are also BootScene's job).
 - **`setScrollFactor(0)` cancels camera *scroll*, not *zoom*.** Any new screen-anchored object (HUD/touch-control) still drifts off its intended position once `cameras.main` is zoomed unless it's also excluded from `cameras.main` (and rendered via `GameScene.uiCamera` instead, which is never zoomed/scrolled). Conversely, any new *world* object (pooled entity, ad-hoc fx) must call `ignoreInUiCamera(scene, this)` right after `scene.add.existing(this)`, or it'll double-render through the UI camera too. See Camera/UI-camera section below and `docs/troubleshooting.md` — this exact gap is what made the mobile joystick/fire button visually render in the wrong place while their hit-test math (which isn't zoom-affected) stayed correct, i.e. "looks unresponsive" without any logic bug.
+- **Never import the static `CANVAS_WIDTH`/`CANVAS_HEIGHT` for layout positioning in a Scene/system.** They're the desktop-only default; mobile uses `MOBILE_CANVAS_WIDTH/HEIGHT` instead (picked in `main.ts`, the only place allowed to call `isMobileMode()` — `config.ts` itself must stay importable under Vitest's plain-Node test environment, no `window`/`navigator`). Read `scene.scale.width`/`scene.scale.height` instead — always accurate to whichever pair `main.ts` actually chose. See Portrait-by-default section below.
 
-## Mobile touch controls (added recently — see `TouchControls.ts`, `utils/device.ts`)
+## Mobile touch controls (see `TouchControls.ts`, `utils/device.ts`)
 
 - Auto-detected via `isMobileMode()`; force with `?mobile=1` / `?mobile=0` (handy for testing without real touch hardware).
-- Virtual joystick: fixed bottom-left, drives the *same* `accelerate/brake/left/right` booleans keyboard does (digital threshold against a deadzone, not analog) — `playerPhysics.ts` needed zero changes.
-- Fire button: bottom-right, fires rocket/side-guns; hidden while turret equipped (turret doesn't use it).
+- Virtual joystick: fixed bottom-left, drives the *same* `accelerate/brake/left/right` booleans keyboard does (digital threshold against a deadzone, not analog) — `playerPhysics.ts` needed zero changes. Deadzone is **per-axis** and asymmetric (`joystickDeadzoneX` 0.55 > `joystickDeadzoneY` 0.3) — steering needs a deliberately bigger push than accelerate/brake so small sideways wobble while pushing straight up doesn't misfire as a turn. `PLAYER_HANDLING.minTurnRateDeg`/`maxTurnRateDeg` were also lowered — that one's shared physics, affecting keyboard steering too, not just touch.
+- Fire button: bottom-*center*-right (not the literal bottom-right corner — that's the weapon sidebar's footprint on the narrower mobile canvas), fires rocket/side-guns; hidden while turret equipped (turret doesn't use it).
 - Turret aim/fire: resolved via `TouchControls.getTurretAimPointer()` (scans `scene.input.manager.pointers`, excludes the joystick's pointer + UI zones) — works for both mouse (desktop) and multi-touch (mobile, lets one thumb stay on the joystick while the other taps/holds to aim). Requires `input.activePointers: 2` in `main.ts`'s Phaser config.
-- Weapon sidebar is tappable/clickable on **both** platforms (`weaponSidebarRowRect()` in `config.ts` is the one shared hit-rect source, used by both the HUD highlight draw and the tap hit-test).
+- Weapon sidebar is tappable/clickable on **both** platforms (`weaponSidebarRowRect(index, originX, originYStart)` in `config.ts` is the one shared hit-rect source, used by both the HUD highlight draw and the tap hit-test — `originX/originYStart` come from `sidebarOrigin(scene.scale.width, scene.scale.height)`, resolved once per `HudSystem`/`TouchControls` construction).
 - No touch equivalent for drift (Shift) yet — open question, see high-level-design.md's Open questions.
+
+## Portrait-by-default on mobile
+
+Mobile defaults to a portrait canvas (`MOBILE_CANVAS_WIDTH/HEIGHT`, 600×960); desktop stays landscape (`CANVAS_WIDTH/HEIGHT`, 960×600) — `main.ts` is the only place that decides which, via `isMobileMode()`. See the "never import the static CANVAS_WIDTH/HEIGHT for layout" convention bullet above and `docs/high-level-design.md`'s "Portrait-by-default on mobile" section for the full reasoning (the short version: `config.ts` can't call `isMobileMode()` itself without breaking Vitest, since it's plain Node with no `window`/`navigator`).
 
 ## Camera (both platforms) + UI camera
 

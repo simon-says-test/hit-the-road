@@ -21,7 +21,9 @@ Free 2D movement, Micro-Machines-style: steering turns the car's heading rather 
 - **Space** (or click, for the turret — see below) — fire selected weapon
 - **Shift** — handbrake/drift: sharper turning than steering alone, at the cost of speed and weapon stability, while held and steering above a minimum speed — and lets the car's actual direction of travel lag behind its heading for a beat (a slide), rather than snapping instantly the way a non-drifting turn does
 
-On a touch device (auto-detected; see HUD below for the tappable weapon sidebar and Weapons for turret aiming), the same controls are available via a fixed virtual joystick (bottom-left — push to accelerate/brake/steer, the same accelerate/brake/left/right state keyboard input drives) and a fire button (bottom-right, fires the rocket/side-guns, hidden while the turret is equipped since it doesn't use it). There's no touch equivalent for drift yet. Desktop keyboard/mouse play is unchanged either way.
+On a touch device (auto-detected; see HUD below for the tappable weapon sidebar and Weapons for turret aiming), the same controls are available via a fixed virtual joystick (bottom-left — push to accelerate/brake/steer, the same accelerate/brake/left/right state keyboard input drives; steering needs a deliberately bigger push than accelerate/brake, so small sideways thumb wobble while pushing straight up doesn't read as an unintended turn) and a fire button (bottom-center-right, fires the rocket/side-guns, hidden while the turret is equipped since it doesn't use it). There's no touch equivalent for drift yet. Desktop keyboard/mouse play is unchanged either way — though the car's overall steering turn rate was also toned down for everyone, not just touch, after feedback that it felt too twitchy to control precisely on keyboard too.
+
+Mobile also defaults to a portrait-shaped (taller-than-wide) canvas rather than the desktop's landscape one — held the natural way a phone is held, rather than needing to be rotated. Desktop is unaffected.
 
 Handling notes:
 
