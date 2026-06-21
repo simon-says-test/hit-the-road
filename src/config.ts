@@ -1,8 +1,26 @@
 // Landscape now rather than the old portrait scroller — a closed-loop track
 // that winds and turns sideways (not just up) needs horizontal room, and a
-// minimap (added once rivals are back) wants a free corner to live in.
+// minimap (added once rivals are back) wants a free corner to live in. This
+// is the desktop default — see MOBILE_CANVAS_WIDTH/HEIGHT below for the
+// portrait default used on touch devices, and main.ts for where the two get
+// picked between.
 export const CANVAS_WIDTH = 960;
 export const CANVAS_HEIGHT = 600;
+
+// Portrait-by-default on mobile: most phones are held vertically, and
+// letterboxing the landscape 960x600 canvas into a portrait viewport left
+// it tiny with huge black bars top/bottom. A clean inverse of the desktop
+// ratio, not an attempt to match any specific device's exact aspect ratio —
+// Scale.FIT (see main.ts) letterboxes any mismatch regardless.
+//
+// main.ts is the only place that calls isMobileMode() to choose between this
+// pair and the desktop one above, since config.ts itself has to stay safe to
+// import under Vitest's plain-Node test environment (no window/navigator) —
+// everywhere else that needs the *actual* active canvas size reads
+// `scene.scale.width/height` (always accurate to whichever pair main.ts
+// picked) rather than importing a static constant for layout purposes.
+export const MOBILE_CANVAS_WIDTH = 600;
+export const MOBILE_CANVAS_HEIGHT = 960;
 
 // Paved road width, constant along the whole track (only the rock walls
 // beyond its edges meander — see WALLS). Widened from the old 320 now that
@@ -81,9 +99,15 @@ export const PLAYER_HANDLING = {
   // lane-drift lateral velocity — sluggish at low speed, sharpest at top
   // speed, same min/max-ramp-by-speed idea as the old lateral model. Raised
   // from an initial 70/170 after playtesting found the car couldn't turn
-  // fast enough at speed to comfortably follow the generated loop's curves.
-  minTurnRateDeg: 90,
-  maxTurnRateDeg: 230,
+  // fast enough at speed to comfortably follow the generated loop's curves;
+  // lowered back down somewhat (90/230 -> 75/190) after later feedback that
+  // steering felt too sensitive/twitchy to control precisely — this applies
+  // equally to keyboard and the mobile joystick (both just drive the same
+  // left/right booleans into this shared turn rate), unlike the joystick's
+  // own deadzone tuning (MOBILE_CONTROLS), which only addresses touch-
+  // specific accidental-drift misfires.
+  minTurnRateDeg: 75,
+  maxTurnRateDeg: 190,
   offroadDrag: 260,
   // How fast the car's actual velocity direction snaps toward its heading
   // each frame while gripping (not drifting) — see DRIFT.slipEase for the
@@ -426,41 +450,77 @@ export const WEAPON_METER = {
 // main camera's followed action in the middle of the screen, now that the
 // world scrolls in every direction rather than just vertically past a
 // fixed lane.
+// Margins, not absolute positions — this sidebar renders on both the
+// desktop (landscape) and mobile (portrait) canvas, which are different
+// sizes (see MOBILE_CANVAS_WIDTH/HEIGHT above), so it can't bake in either
+// one. rightMargin/bottomMargin reproduce the original desktop position
+// exactly (960-160=800, 600-200=400) — see sidebarOrigin() below, which
+// HudSystem/TouchControls call with the scene's actual live
+// scale.width/height to get real on-screen coordinates.
 export const WEAPON_SIDEBAR = {
-  x: 800,
-  yStart: 400,
+  rightMargin: 160,
+  bottomMargin: 200,
   rowHeight: 64,
   swatchSize: 14,
   reloadBarWidth: 40,
   reloadBarHeight: 6,
 };
 
+// Resolves WEAPON_SIDEBAR's margins against the actual active canvas size —
+// see WEAPON_SIDEBAR's comment for why this can't be a static position.
+export function sidebarOrigin(canvasWidth: number, canvasHeight: number): { x: number; yStart: number } {
+  return { x: canvasWidth - WEAPON_SIDEBAR.rightMargin, yStart: canvasHeight - WEAPON_SIDEBAR.bottomMargin };
+}
+
 // Shared by HudSystem's per-frame selected-row highlight and TouchControls'
 // tap-to-switch hit-testing — one source of truth for the row rect so a tap
-// always lands exactly where the highlight is drawn.
-export function weaponSidebarRowRect(index: number): { x: number; y: number; width: number; height: number } {
+// always lands exactly where the highlight is drawn. Takes the sidebar's
+// already-resolved origin (see sidebarOrigin) rather than reading
+// WEAPON_SIDEBAR.x/yStart directly, since those no longer exist as absolute
+// positions.
+export function weaponSidebarRowRect(index: number, originX: number, originYStart: number): { x: number; y: number; width: number; height: number } {
   return {
-    x: WEAPON_SIDEBAR.x - 6,
-    y: WEAPON_SIDEBAR.yStart + index * WEAPON_SIDEBAR.rowHeight - 6,
+    x: originX - 6,
+    y: originYStart + index * WEAPON_SIDEBAR.rowHeight - 6,
     width: WEAPON_SIDEBAR.reloadBarWidth + 56,
     height: WEAPON_SIDEBAR.rowHeight - 10,
   };
 }
 
 // Fixed-position virtual joystick (bottom-left) and fire button (bottom-
-// right, clear of the weapon sidebar's footprint) shown only when
-// isMobileMode() — see utils/device.ts and systems/TouchControls.ts.
+// center-right, clear of both the joystick and the weapon sidebar) shown
+// only when isMobileMode() — see utils/device.ts and
+// systems/TouchControls.ts. Positions here are plain numbers (not derived
+// from a canvas-size variable) because this whole block only ever renders
+// against the one fixed mobile canvas size, MOBILE_CANVAS_WIDTH/HEIGHT
+// (600x960) — unlike WEAPON_SIDEBAR above, which has to work on both the
+// desktop and mobile canvas and so can't bake in either one.
 export const MOBILE_CONTROLS = {
   joystickBaseX: 110,
-  joystickBaseY: CANVAS_HEIGHT - 110,
-  joystickRadius: 60,
-  joystickThumbRadius: 28,
-  // Fraction of joystickRadius the thumb must be dragged past before it
-  // registers as accelerate/brake/left/right — keeps small thumb jitter
-  // from reading as constant input.
-  joystickDeadzone: 0.35,
-  fireButtonX: 700,
-  fireButtonY: CANVAS_HEIGHT - 90,
+  joystickBaseY: MOBILE_CANVAS_HEIGHT - 110,
+  // Smaller travel radius than the original 60 — playtesting feedback was
+  // that the full range made steering imprecise (a small thumb drift
+  // sideways covered a lot of relative distance). A tighter zone needs less
+  // thumb travel to reach its extremes, which alone would make every axis
+  // *more* sensitive (same deadzone fraction over a shorter absolute
+  // distance) — countered below by raising joystickDeadzoneX specifically.
+  joystickRadius: 48,
+  joystickThumbRadius: 24,
+  // Deadzones are a fraction of joystickRadius, split per axis rather than
+  // one shared value — steering (X) needs a deliberately larger push than
+  // accelerate/brake (Y) to register, so small left/right wobble while
+  // pushing straight up doesn't read as an unintended turn. Absolute pixel
+  // thresholds: X = 48*0.55 = 26.4px (vs. the old single 60*0.35 = 21px),
+  // Y = 48*0.3 = 14.4px (more responsive than before).
+  joystickDeadzoneX: 0.55,
+  joystickDeadzoneY: 0.3,
+  // Bottom-center-right rather than bottom-right — on the narrower portrait
+  // canvas, the true bottom-right corner is the weapon sidebar's footprint
+  // (sidebarOrigin(600, 960) lands it around x:434-530), so the fire button
+  // sits just to the left of that instead, at the same height as the
+  // joystick for a comfortable symmetric two-thumb hold.
+  fireButtonX: 300,
+  fireButtonY: MOBILE_CANVAS_HEIGHT - 110,
   fireButtonRadius: 48,
   baseAlpha: 0.3,
   activeAlpha: 0.55,

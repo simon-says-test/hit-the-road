@@ -31,8 +31,6 @@ import {
   DEPTHS,
   ROAD_COLORS,
   WALLS,
-  CANVAS_WIDTH,
-  CANVAS_HEIGHT,
   ENEMY_ARCHETYPES,
   EnemyArchetypeConfig,
   RIVALS,
@@ -132,7 +130,11 @@ export class GameScene extends Phaser.Scene {
     // Created before anything else this frame — every world entity's
     // constructor (PlayerCar, EnemyCar, Projectile, Hazard, Pickup) looks
     // this up via ignoreInUiCamera() as it's built, so it has to exist first.
-    this.uiCamera = this.cameras.add(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    // scale.width/height (not a static CANVAS_WIDTH/HEIGHT import) — the
+    // active canvas is desktop-landscape or mobile-portrait depending on
+    // what main.ts picked at boot (see config.ts's MOBILE_CANVAS_WIDTH/
+    // HEIGHT comment).
+    this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
 
     this.rng = this.getSeedFromUrl() ?? Math.random;
     this.track = generateTrack(this.rng);
@@ -868,10 +870,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildOverlay(): Phaser.GameObjects.Container {
-    const bg = this.add.rectangle(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, 0x000000, 0.6);
+    // scale.width/height, not a static CANVAS_WIDTH/HEIGHT import — see
+    // uiCamera's comment in create() for why.
+    const { width, height } = this.scale;
+    const bg = this.add.rectangle(0, 0, width, height, 0x000000, 0.6);
     bg.setOrigin(0, 0);
 
-    const title = this.add.text(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 60, "Game Over", {
+    const title = this.add.text(width / 2, height / 2 - 60, "Game Over", {
       fontFamily: "monospace",
       fontSize: "40px",
       color: "#ffffff",
@@ -879,7 +884,7 @@ export class GameScene extends Phaser.Scene {
     title.setOrigin(0.5);
     title.setName("title");
 
-    const final = this.add.text(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, "Distance: 0 m", {
+    const final = this.add.text(width / 2, height / 2, "Distance: 0 m", {
       fontFamily: "monospace",
       fontSize: "22px",
       color: "#ffffff",
@@ -887,7 +892,7 @@ export class GameScene extends Phaser.Scene {
     final.setOrigin(0.5);
     final.setName("finalScore");
 
-    const best = this.add.text(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 26, "Best: 0 m", {
+    const best = this.add.text(width / 2, height / 2 + 26, "Best: 0 m", {
       fontFamily: "monospace",
       fontSize: "18px",
       color: "#ffd166",
@@ -895,7 +900,7 @@ export class GameScene extends Phaser.Scene {
     best.setOrigin(0.5);
     best.setName("bestScore");
 
-    const hint = this.add.text(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 70, "Press SPACE or tap to restart", {
+    const hint = this.add.text(width / 2, height / 2 + 70, "Press SPACE or tap to restart", {
       fontFamily: "monospace",
       fontSize: "16px",
       color: "#cccccc",

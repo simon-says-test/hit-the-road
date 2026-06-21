@@ -1,5 +1,4 @@
 import Phaser from "phaser";
-import { CANVAS_WIDTH, CANVAS_HEIGHT } from "../config";
 
 // Shown once, right after BootScene finishes loading — explains controls
 // before the player is dropped into traffic. Game-over restarts skip this
@@ -11,10 +10,15 @@ export class IntroScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.add.rectangle(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, 0x16140f, 1).setOrigin(0, 0);
+    // scale.width/height (not a static CANVAS_WIDTH/HEIGHT import) — the
+    // active canvas is desktop-landscape or mobile-portrait depending on
+    // what main.ts picked at boot (see config.ts's MOBILE_CANVAS_WIDTH/
+    // HEIGHT comment), and this has to lay out correctly for either.
+    const { width, height } = this.scale;
+    this.add.rectangle(0, 0, width, height, 0x16140f, 1).setOrigin(0, 0);
 
     this.add
-      .text(CANVAS_WIDTH / 2, 70, "HIT THE ROAD", {
+      .text(width / 2, 70, "HIT THE ROAD", {
         fontFamily: "monospace",
         fontSize: "36px",
         color: "#ffffff",
@@ -41,7 +45,7 @@ export class IntroScene extends Phaser.Scene {
 
     this.add
       .text(
-        CANVAS_WIDTH / 2,
+        width / 2,
         startY + lines.length * rowHeight + 30,
         "Landing hits slows them down. Getting hit slows you.",
         { fontFamily: "monospace", fontSize: "12px", color: "#999999" }
@@ -49,7 +53,7 @@ export class IntroScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const prompt = this.add
-      .text(CANVAS_WIDTH / 2, CANVAS_HEIGHT - 60, "Press SPACE or tap to start", {
+      .text(width / 2, height - 60, "Press SPACE or tap to start", {
         fontFamily: "monospace",
         fontSize: "20px",
         color: "#ffffff",

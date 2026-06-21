@@ -19,6 +19,7 @@ src/
   config.ts                — ALL tunable numbers + a few pure helper fns (wallImpactDamage, weaponSidebarRowRect, nextCrateIntervalMs). Check here first for "what's the current value of X."
   utils/
     device.ts               — isMobileMode() touch-capability auto-detect (+ ?mobile=1/0 override)
+    cameraLayers.ts          — ignoreInUiCamera(scene, obj): excludes a world object from GameScene.uiCamera (see Camera/UI-camera section below)
   entities/
     PlayerCar.ts             — Phaser wrapper: heading/speed/health/drift/weapon-select, applies playerPhysics to the sprite
     playerPhysics.ts          — pure handling math (Phaser-free, unit-tested): accel/brake/reverse, heading-based steer, drift slip, off-road/wall/terrain drag
@@ -38,7 +39,8 @@ src/
     BootScene.ts             — loads art/audio, procedurally draws hazard-patch/obstacle textures (road itself is drawn fresh per-race, not pre-baked)
     IntroScene.ts             — one-time controls screen → GameScene
     GameScene.ts              — orchestrates everything: spawns, per-frame update, firing, collisions, camera, game-over/finish. Reads config + delegates to systems/.
-e2e/tests/core.spec.ts      — Playwright, asserts against window.__GAME_STATE__
+e2e/tests/core.spec.ts      — Playwright, asserts against window.__GAME_STATE__ (keyboard/mouse, default desktop viewport)
+e2e/tests/mobile.spec.ts    — Playwright, touch-emulated (test.use({hasTouch:true, viewport:960x600})), exercises TouchControls
 scripts/setup-headless-chromium.sh — fixes headless Chromium for this sandboxed/no-sudo environment (see Testing below)
 ```
 
@@ -52,6 +54,7 @@ scripts/setup-headless-chromium.sh — fixes headless Chromium for this sandboxe
 - **Pure logic lives in Phaser-free modules** (`playerPhysics.ts`, `weapons.ts`, `enemyBehaviors.ts`, `track.ts`) with their own `*.test.ts`; the `*Car`/entity classes are thin Phaser wrappers around them. Follow this split for new gameplay rules rather than inlining math into a scene/entity class.
 - **`src/systems/`** is for scene-level cross-cutting orchestration (HUD, input, collision math, pickups) constructed once in `GameScene.create()` — extract a new one once a second instance of a concern shows up, same reasoning as the archetype/weapon data-over-subclass pattern.
 - **Asset loading is BootScene-only** — gameplay/entity/scene code references texture/sound keys, never loads or generates art itself (procedural placeholders via `Graphics.generateTexture()` are also BootScene's job).
+- **`setScrollFactor(0)` cancels camera *scroll*, not *zoom*.** Any new screen-anchored object (HUD/touch-control) still drifts off its intended position once `cameras.main` is zoomed unless it's also excluded from `cameras.main` (and rendered via `GameScene.uiCamera` instead, which is never zoomed/scrolled). Conversely, any new *world* object (pooled entity, ad-hoc fx) must call `ignoreInUiCamera(scene, this)` right after `scene.add.existing(this)`, or it'll double-render through the UI camera too. See Camera/UI-camera section below and `docs/troubleshooting.md` — this exact gap is what made the mobile joystick/fire button visually render in the wrong place while their hit-test math (which isn't zoom-affected) stayed correct, i.e. "looks unresponsive" without any logic bug.
 
 ## Mobile touch controls (added recently — see `TouchControls.ts`, `utils/device.ts`)
 
@@ -62,9 +65,11 @@ scripts/setup-headless-chromium.sh — fixes headless Chromium for this sandboxe
 - Weapon sidebar is tappable/clickable on **both** platforms (`weaponSidebarRowRect()` in `config.ts` is the one shared hit-rect source, used by both the HUD highlight draw and the tap hit-test).
 - No touch equivalent for drift (Shift) yet — open question, see high-level-design.md's Open questions.
 
-## Camera (both platforms)
+## Camera (both platforms) + UI camera
 
 Zoom (`CAMERA.zoom`/`mobileZoom`) set once in `create()`; per-frame look-ahead offset in `GameScene.updateCameraLookAhead()` biases the follow target toward current heading, scaled by speed, via `setFollowOffset(-lookAheadX, -lookAheadY)` (note the **negative** sign — Phaser centers on `target - offset`).
+
+`GameScene.uiCamera` is a second camera (zoom 1, no scroll, created first thing in `create()`) dedicated to screen-anchored HUD/touch-control rendering — see the convention bullet above for why it exists. Two-sided exclusion: world entities exclude themselves from `uiCamera` at construction (`ignoreInUiCamera`); `HudSystem`/`TouchControls`/the overlay get excluded from `cameras.main` once each, right after construction (`cameras.main.ignore(hud.getUiLayer())` etc. in `GameScene.create()`). `HudSystem.weaponMeter`/`healthBars` are the one in-`HudSystem` exception — they're world-anchored (no scrollFactor override), so they call `ignoreInUiCamera` instead of joining `hud.getUiLayer()`.
 
 ## Impact feel (tuned to favor speed-loss over raw damage)
 
@@ -82,6 +87,7 @@ Three independent impact paths, all in `config.ts`: `OBSTACLES` (small rocks —
 
   (Setup is idempotent/cached — only slow the very first time per container.) Full detail: `docs/troubleshooting.md`.
 - `?seed=N` — deterministic track/AI/hazard rolls for reproducible e2e assertions (`createSeededRng`, every `Math.random()` in `GameScene` goes through `this.rng` instead).
+- `e2e/playwright.config.ts` pins `workers: 1` — tests assert on real-time-driven physics deltas over a fixed `waitForTimeout`, and concurrent headless Chromium instances in this resource-constrained sandbox starve each other's event loop enough to make that flaky. Don't remove this to "speed things up" without re-verifying stability across several runs.
 - `playtest` skill — headless-Chromium scripted/visual verification of actual gameplay (not just state assertions); use a fixed scratch script filename across a debugging session, not a new one per iteration (see CLAUDE.md's prompt-reduction notes).
 - `npx tsc --noEmit` — typecheck (strict; unused-locals/params errors are real, not noise — parameter properties exempt unused-param checks but you still need to actually use them somewhere if declared `private`).
 

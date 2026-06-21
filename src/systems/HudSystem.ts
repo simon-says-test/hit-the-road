@@ -3,7 +3,6 @@ import { PlayerCar } from "../entities/PlayerCar";
 import { RivalState } from "./RaceTracker";
 import { sideGunAngleDeg, sideGunMountPosition } from "../entities/weapons";
 import {
-  CANVAS_WIDTH,
   WEAPON_SIDEBAR,
   WEAPON_VISUALS,
   WEAPON_METER,
@@ -16,6 +15,7 @@ import {
   WEAPONS,
   WeaponId,
   weaponSidebarRowRect,
+  sidebarOrigin,
 } from "../config";
 import { ignoreInUiCamera } from "../utils/cameraLayers";
 
@@ -65,8 +65,18 @@ export class HudSystem {
   // scrollFactor(0) alone doesn't cancel it out).
   private uiLayer: Phaser.GameObjects.Layer;
 
+  // Resolved once against the scene's actual active canvas size (desktop-
+  // landscape or mobile-portrait — see config.ts's MOBILE_CANVAS_WIDTH/
+  // HEIGHT comment) rather than a static position, since WEAPON_SIDEBAR is
+  // margin-based for exactly this reason.
+  private sidebarX: number;
+  private sidebarYStart: number;
+
   constructor(scene: Phaser.Scene, highScore: number) {
     this.uiLayer = scene.add.layer();
+    const origin = sidebarOrigin(scene.scale.width, scene.scale.height);
+    this.sidebarX = origin.x;
+    this.sidebarYStart = origin.yStart;
 
     this.healthText = scene.add
       .text(16, 16, "Health: 100", { fontFamily: "monospace", fontSize: "18px", color: "#ffffff" })
@@ -93,7 +103,7 @@ export class HudSystem {
       .setDepth(DEPTHS.hud)
       .setScrollFactor(0);
     this.raceDebugText = scene.add
-      .text(CANVAS_WIDTH - 16, 16, "", {
+      .text(scene.scale.width - 16, 16, "", {
         fontFamily: "monospace",
         fontSize: "26px",
         fontStyle: "bold",
@@ -125,8 +135,8 @@ export class HudSystem {
 
     this.sidebarAmmoTexts = {} as Record<WeaponId, Phaser.GameObjects.Text>;
     WEAPON_IDS.forEach((id, i) => {
-      const y = WEAPON_SIDEBAR.yStart + i * WEAPON_SIDEBAR.rowHeight;
-      const x = WEAPON_SIDEBAR.x;
+      const y = this.sidebarYStart + i * WEAPON_SIDEBAR.rowHeight;
+      const x = this.sidebarX;
       const swatch = WEAPON_SIDEBAR.swatchSize;
       const swatchRect = scene.add.rectangle(x, y, swatch, swatch, WEAPON_VISUALS[id].tint).setOrigin(0, 0).setDepth(DEPTHS.hud).setScrollFactor(0);
       const numberText = scene.add
@@ -283,8 +293,8 @@ export class HudSystem {
 
       // Reload/readiness bar inline with the ammo count — the
       // cooldownRemaining/fireCooldown ratio.
-      const rowY = WEAPON_SIDEBAR.yStart + i * WEAPON_SIDEBAR.rowHeight;
-      const barX = WEAPON_SIDEBAR.x + 50;
+      const rowY = this.sidebarYStart + i * WEAPON_SIDEBAR.rowHeight;
+      const barX = this.sidebarX + 50;
       const barY = rowY + WEAPON_SIDEBAR.swatchSize + 13;
       const w = WEAPON_SIDEBAR.reloadBarWidth;
       const h = WEAPON_SIDEBAR.reloadBarHeight;
@@ -296,7 +306,7 @@ export class HudSystem {
     const g = this.weaponSidebarHighlight;
     g.clear();
     const idx = WEAPON_IDS.indexOf(player.weapons.current);
-    const rect = weaponSidebarRowRect(idx);
+    const rect = weaponSidebarRowRect(idx, this.sidebarX, this.sidebarYStart);
     g.fillStyle(0xffffff, 0.15).fillRect(rect.x, rect.y, rect.width, rect.height);
   }
 }

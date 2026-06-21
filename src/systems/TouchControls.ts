@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { WeaponId, MOBILE_CONTROLS, DEPTHS, weaponSidebarRowRect } from "../config";
+import { WeaponId, MOBILE_CONTROLS, DEPTHS, weaponSidebarRowRect, sidebarOrigin } from "../config";
 import { isMobileMode } from "../utils/device";
 
 const WEAPON_IDS: WeaponId[] = ["rocket", "sideguns", "turret"];
@@ -31,7 +31,16 @@ export class TouchControls {
   private fireButtonPointerId: number | null = null;
   private currentWeapon: WeaponId = "rocket";
 
+  // Resolved once against the scene's actual active canvas size — same
+  // reason as HudSystem's identical fields, so a tap always lands exactly
+  // where the sidebar is actually drawn on whichever canvas is active.
+  private sidebarX: number;
+  private sidebarYStart: number;
+
   constructor(private scene: Phaser.Scene, private onWeaponSelect: (weapon: WeaponId) => void) {
+    const origin = sidebarOrigin(scene.scale.width, scene.scale.height);
+    this.sidebarX = origin.x;
+    this.sidebarYStart = origin.yStart;
     if (this.enabled) {
       this.graphics = scene.add.graphics().setDepth(DEPTHS.hud).setScrollFactor(0);
     }
@@ -43,7 +52,7 @@ export class TouchControls {
 
   private weaponRowAt(x: number, y: number): WeaponId | null {
     for (let i = 0; i < WEAPON_IDS.length; i++) {
-      const r = weaponSidebarRowRect(i);
+      const r = weaponSidebarRowRect(i, this.sidebarX, this.sidebarYStart);
       if (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height) return WEAPON_IDS[i];
     }
     return null;
@@ -109,12 +118,12 @@ export class TouchControls {
   // does — playerPhysics.ts's computeDrive needs no changes for this.
   getMoveInput(): TouchMoveInput {
     if (!this.enabled) return { accelerate: false, brake: false, left: false, right: false };
-    const { joystickDeadzone } = MOBILE_CONTROLS;
+    const { joystickDeadzoneX, joystickDeadzoneY } = MOBILE_CONTROLS;
     return {
-      accelerate: this.joystickVector.y < -joystickDeadzone,
-      brake: this.joystickVector.y > joystickDeadzone,
-      left: this.joystickVector.x < -joystickDeadzone,
-      right: this.joystickVector.x > joystickDeadzone,
+      accelerate: this.joystickVector.y < -joystickDeadzoneY,
+      brake: this.joystickVector.y > joystickDeadzoneY,
+      left: this.joystickVector.x < -joystickDeadzoneX,
+      right: this.joystickVector.x > joystickDeadzoneX,
     };
   }
 
