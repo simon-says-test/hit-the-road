@@ -24,6 +24,7 @@ import { CollisionHandler } from "../systems/CollisionHandler";
 import { PickupSystem } from "../systems/PickupSystem";
 import { TouchControls } from "../systems/TouchControls";
 import { isMobileMode } from "../utils/device";
+import { ignoreInUiCamera } from "../utils/cameraLayers";
 import {
   SCORE_DISTANCE_DIVISOR,
   WEAPON_VISUALS,
@@ -106,6 +107,14 @@ export class GameScene extends Phaser.Scene {
 
   private overlay!: Phaser.GameObjects.Container;
 
+  // A second, never-zoomed/never-scrolled camera dedicated to screen-
+  // anchored HUD/touch-control graphics — see utils/cameraLayers.ts for why
+  // plain setScrollFactor(0) isn't enough once cameras.main is zoomed (every
+  // world entity registers itself out of this camera at construction time;
+  // HudSystem/TouchControls/the overlay get excluded from cameras.main
+  // instead, once each, right after they're built below).
+  uiCamera!: Phaser.Cameras.Scene2D.Camera;
+
   constructor() {
     super("game");
   }
@@ -119,6 +128,11 @@ export class GameScene extends Phaser.Scene {
     this.oilDriftBias = 0;
     this.cameraLookAhead = { x: 0, y: 0 };
     this.highScore = Number(localStorage.getItem(HIGH_SCORE_STORAGE_KEY) ?? 0);
+
+    // Created before anything else this frame — every world entity's
+    // constructor (PlayerCar, EnemyCar, Projectile, Hazard, Pickup) looks
+    // this up via ignoreInUiCamera() as it's built, so it has to exist first.
+    this.uiCamera = this.cameras.add(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
     this.rng = this.getSeedFromUrl() ?? Math.random;
     this.track = generateTrack(this.rng);
@@ -157,6 +171,11 @@ export class GameScene extends Phaser.Scene {
     this.hud = new HudSystem(this, this.highScore);
     this.inputHandler = new InputHandler(this, (weapon) => this.player.selectWeapon(weapon));
     this.touchControls = new TouchControls(this, (weapon) => this.player.selectWeapon(weapon));
+    // Screen-anchored HUD/touch-control graphics render via uiCamera instead
+    // (see its field comment) — excluded here so the zoomed/scrolling main
+    // camera doesn't also draw a second, wrongly-displaced copy of them.
+    this.cameras.main.ignore(this.hud.getUiLayer());
+    this.cameras.main.ignore(this.touchControls.getDisplayObjects());
 
     // Player vs. enemies is a *collider*, not an overlap — Arcade Physics
     // then physically separates the two bodies every step they touch, on
@@ -182,6 +201,7 @@ export class GameScene extends Phaser.Scene {
 
     this.overlay = this.buildOverlay();
     this.overlay.setVisible(false);
+    this.cameras.main.ignore(this.overlay);
 
     // Test hooks: when `?e2e=1` is present or `window.__E2E_TEST__` is set,
     // expose a lightweight `__GAME_STATE__` for E2E assertions. This is
@@ -286,6 +306,7 @@ export class GameScene extends Phaser.Scene {
   // every frame the way the old scrolling-road model had to.
   private drawTrack(track: Track): void {
     const g = this.add.graphics().setDepth(DEPTHS.roadBackground);
+    ignoreInUiCamera(this, g);
     const n = track.samples.length;
 
     for (let i = 0; i < n; i++) {
@@ -792,6 +813,7 @@ export class GameScene extends Phaser.Scene {
       .setScale(0.4)
       .setBlendMode(Phaser.BlendModes.ADD)
       .setTint(VISUAL_TINTS.explosion);
+    ignoreInUiCamera(this, fx);
     this.tweens.add({
       targets: fx,
       scale: 1.1,

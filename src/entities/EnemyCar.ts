@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { computeTargetHeading, turnTowardHeading, curvatureSpeedFactor } from "./enemyBehaviors";
 import { EnemyArchetypeConfig, CAR_SCALE, DEPTHS, COLLISION_SHUNT, DAMAGE_SLOW, WALLS, ROUGH_TERRAIN, OIL_SLICK, ENEMY_AI, wallImpactDamage } from "../config";
+import { ignoreInUiCamera } from "../utils/cameraLayers";
 
 export interface NearestRival {
   awayFromNearestRivalDeg: number;
@@ -62,6 +63,7 @@ export class EnemyCar extends Phaser.Physics.Arcade.Image {
   constructor(scene: Phaser.Scene, x: number, y: number, texture: string) {
     super(scene, x, y, texture);
     scene.add.existing(this);
+    ignoreInUiCamera(scene, this);
     scene.physics.add.existing(this);
     this.setScale(CAR_SCALE);
     this.setBounce(0.15);

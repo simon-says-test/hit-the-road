@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { DEPTHS, WeaponId } from "../config";
+import { ignoreInUiCamera } from "../utils/cameraLayers";
 
 export type PickupType = "health" | "ammo" | "boost-score" | "boost-speed";
 
@@ -11,6 +12,7 @@ export class Pickup extends Phaser.Physics.Arcade.Image {
   constructor(scene: Phaser.Scene, x: number, y: number, texture: string) {
     super(scene, x, y, texture);
     scene.add.existing(this);
+    ignoreInUiCamera(scene, this);
     scene.physics.add.existing(this);
     this.setDepth(DEPTHS.pickup);
     // Bigger than the old 0.6 — at car scale, pickups were easy to miss

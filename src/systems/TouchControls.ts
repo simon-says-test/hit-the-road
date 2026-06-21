@@ -122,6 +122,13 @@ export class TouchControls {
     return this.fireButtonPointerId !== null;
   }
 
+  // GameScene calls cameras.main.ignore(...) with this once, right after
+  // construction — same screen-anchored-vs-zoomed-camera reason as
+  // HudSystem.getUiLayer(). Empty when !enabled (no graphics exist).
+  getDisplayObjects(): Phaser.GameObjects.GameObject[] {
+    return this.graphics ? [this.graphics] : [];
+  }
+
   // Returns whichever active pointer should aim/fire the turret this frame:
   // the first pointer that's down, isn't the joystick's or fire button's
   // tracked finger, and isn't currently over the sidebar/joystick/fire-

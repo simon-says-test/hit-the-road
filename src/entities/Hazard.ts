@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { DEPTHS } from "../config";
+import { ignoreInUiCamera } from "../utils/cameraLayers";
 
 // "rough"/"oil" are continuous patches a car drives over (no despawn on
 // contact, keeps affecting whoever's overlapping every frame). "obstacle"
@@ -15,6 +16,7 @@ export class Hazard extends Phaser.Physics.Arcade.Image {
   constructor(scene: Phaser.Scene, x: number, y: number, texture: string) {
     super(scene, x, y, texture);
     scene.add.existing(this);
+    ignoreInUiCamera(scene, this);
     scene.physics.add.existing(this);
     this.setDepth(DEPTHS.hazard);
   }

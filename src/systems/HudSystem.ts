@@ -17,6 +17,7 @@ import {
   WeaponId,
   weaponSidebarRowRect,
 } from "../config";
+import { ignoreInUiCamera } from "../utils/cameraLayers";
 
 const WEAPON_IDS: WeaponId[] = ["rocket", "sideguns", "turret"];
 const WEAPON_LABELS: Record<WeaponId, string> = { rocket: "ROCKET", sideguns: "SIDEGUNS", turret: "TURRET" };
@@ -56,7 +57,17 @@ export class HudSystem {
   private sidebarReloadBars: Phaser.GameObjects.Graphics;
   private sidebarAmmoTexts: Record<WeaponId, Phaser.GameObjects.Text>;
 
+  // Every screen-anchored (scrollFactor(0)) object this class owns, so
+  // GameScene can exclude all of them from the zoomed/scrolling main camera
+  // in one call (see utils/cameraLayers.ts) — without this, a non-1 zoom
+  // visibly displaces them away from the screen position their own
+  // scrollFactor(0) is supposed to pin them to (zoom isn't scroll; setting
+  // scrollFactor(0) alone doesn't cancel it out).
+  private uiLayer: Phaser.GameObjects.Layer;
+
   constructor(scene: Phaser.Scene, highScore: number) {
+    this.uiLayer = scene.add.layer();
+
     this.healthText = scene.add
       .text(16, 16, "Health: 100", { fontFamily: "monospace", fontSize: "18px", color: "#ffffff" })
       .setDepth(DEPTHS.hud)
@@ -65,7 +76,7 @@ export class HudSystem {
       .text(16, 38, "Distance: 0 m", { fontFamily: "monospace", fontSize: "18px", color: "#ffffff" })
       .setDepth(DEPTHS.hud)
       .setScrollFactor(0);
-    scene.add
+    const bestText = scene.add
       .text(16, 60, `Best: ${highScore} m`, { fontFamily: "monospace", fontSize: "14px", color: "#cccccc" })
       .setDepth(DEPTHS.hud)
       .setScrollFactor(0);
@@ -94,26 +105,35 @@ export class HudSystem {
       .setOrigin(1, 0)
       .setDepth(DEPTHS.hud)
       .setScrollFactor(0);
+    this.uiLayer.add([this.healthText, this.scoreText, bestText, this.speedText, this.weaponText, this.aimText, this.raceDebugText]);
 
+    // World-anchored (no scrollFactor override) — these float near the
+    // player/rivals in world space and must keep tracking the main camera's
+    // zoom/scroll normally, unlike everything else in this class, so they're
+    // deliberately *not* added to uiLayer.
     this.weaponMeter = scene.add.graphics().setDepth(DEPTHS.weaponMeter);
     this.healthBars = scene.add.graphics().setDepth(DEPTHS.healthBar);
+    ignoreInUiCamera(scene, this.weaponMeter);
+    ignoreInUiCamera(scene, this.healthBars);
+
     this.weaponSidebarHighlight = scene.add
       .graphics()
       .setDepth(DEPTHS.hud - 1)
       .setScrollFactor(0);
     this.sidebarReloadBars = scene.add.graphics().setDepth(DEPTHS.hud).setScrollFactor(0);
+    this.uiLayer.add([this.weaponSidebarHighlight, this.sidebarReloadBars]);
 
     this.sidebarAmmoTexts = {} as Record<WeaponId, Phaser.GameObjects.Text>;
     WEAPON_IDS.forEach((id, i) => {
       const y = WEAPON_SIDEBAR.yStart + i * WEAPON_SIDEBAR.rowHeight;
       const x = WEAPON_SIDEBAR.x;
       const swatch = WEAPON_SIDEBAR.swatchSize;
-      scene.add.rectangle(x, y, swatch, swatch, WEAPON_VISUALS[id].tint).setOrigin(0, 0).setDepth(DEPTHS.hud).setScrollFactor(0);
-      scene.add
+      const swatchRect = scene.add.rectangle(x, y, swatch, swatch, WEAPON_VISUALS[id].tint).setOrigin(0, 0).setDepth(DEPTHS.hud).setScrollFactor(0);
+      const numberText = scene.add
         .text(x + swatch + 4, y - 2, `${i + 1}`, { fontFamily: "monospace", fontSize: "12px", color: "#ffffff" })
         .setDepth(DEPTHS.hud)
         .setScrollFactor(0);
-      scene.add
+      const nameText = scene.add
         .text(x, y + swatch + 4, WEAPON_LABELS[id], { fontFamily: "monospace", fontSize: "9px", color: "#dddddd" })
         .setDepth(DEPTHS.hud)
         .setScrollFactor(0);
@@ -121,7 +141,14 @@ export class HudSystem {
         .text(x, y + swatch + 16, "", { fontFamily: "monospace", fontSize: "9px", color: "#aaaaaa" })
         .setDepth(DEPTHS.hud)
         .setScrollFactor(0);
+      this.uiLayer.add([swatchRect, numberText, nameText, this.sidebarAmmoTexts[id]]);
     });
+  }
+
+  // GameScene calls cameras.main.ignore(this) once, right after construction
+  // — see this class's uiLayer field comment for why.
+  getUiLayer(): Phaser.GameObjects.Layer {
+    return this.uiLayer;
   }
 
   updateText(player: PlayerCar, distanceTraveled: number, forwardSpeed: number): void {

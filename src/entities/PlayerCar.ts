@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { computeDrive, PlayerDriveInput, PlayerDriveState } from "./playerPhysics";
 import { WeaponController, FireResult } from "./weapons";
 import { PLAYER_HEALTH, PLAYER_HANDLING, PICKUPS, WeaponId, CAR_SCALE, DEPTHS, DAMAGE_SLOW, WALLS, wallImpactDamage } from "../config";
+import { ignoreInUiCamera } from "../utils/cameraLayers";
 
 export type PlayerInput = PlayerDriveInput;
 
@@ -27,6 +28,7 @@ export class PlayerCar extends Phaser.Physics.Arcade.Image {
     this.driveState.headingDeg = headingDeg;
     this.driveState.velocityHeadingDeg = headingDeg;
     scene.add.existing(this);
+    ignoreInUiCamera(scene, this);
     scene.physics.add.existing(this);
     this.setDepth(DEPTHS.player);
     this.setScale(CAR_SCALE);
