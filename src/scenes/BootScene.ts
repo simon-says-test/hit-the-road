@@ -1,8 +1,5 @@
 import Phaser from "phaser";
-import { CANVAS_WIDTH, CANVAS_HEIGHT, ROAD_X, ROAD_WIDTH, ROAD_COLORS, HAZARDS, TERRAIN_COLORS } from "../config";
-
-const DIVIDER_DASH_HEIGHT = 40;
-const DIVIDER_GAP_HEIGHT = 40;
+import { HAZARDS, OBSTACLES, TERRAIN_COLORS, WALLS } from "../config";
 
 export const SFX_KEYS = {
   collision: "sfx-collision",
@@ -23,6 +20,12 @@ export class BootScene extends Phaser.Scene {
     // Top-down Cars" pack, fx/hazards from Kenney's Particle Pack and Racing
     // Pack, audio from Kenney's Impact Sounds / Sci-fi Sounds / Interface
     // Sounds. See docs/high-level-design.md for the full breakdown + credits.
+
+    // Error handling for asset loading
+    this.load.on("loaderror", (fileObj: any) => {
+      console.error("Failed to load asset:", fileObj.key, fileObj.url);
+    });
+
     this.load.image("car-player", "assets/cars/car-player.png");
     this.load.image("car-enemy-1", "assets/cars/car-enemy-1.png");
     this.load.image("car-enemy-2", "assets/cars/car-enemy-2.png");
@@ -44,44 +47,25 @@ export class BootScene extends Phaser.Scene {
     this.load.audio(SFX_KEYS.pickup, "assets/audio/sfx-pickup.ogg");
     this.load.audio(SFX_KEYS.gameOver, "assets/audio/sfx-gameover.ogg");
 
-    // Road/grass stay procedural, deliberately recolored to a desaturated
-    // wasteland palette — sourced racing-pack tiles read as bright kart-racer
-    // colors that clash with the gritty loaded cars (see CLAUDE.md's Assets
-    // section on preferring consistency over mixing every available source).
-    this.drawRoadBackgroundTexture();
-    this.drawRoadDividerTexture();
+    // The track itself (road ribbon, rock walls, dashed centerline) is no
+    // longer a pre-baked fixed-size texture — it's a different shape every
+    // race now (see entities/track.ts), so GameScene draws it directly into
+    // a Graphics object at race start instead of BootScene generating a
+    // reusable texture for it.
 
     // Terrain hazards (rough road, oil slicks) are ground-level patches the
     // player drives over, not discrete objects — there's no sourced art for
     // that shape, so these stay procedural too, same reasoning as the road.
     this.drawRoughPatchTexture();
     this.drawOilSlickTexture();
+    // Small discrete rock/debris obstacle — a one-time bump, not a patch
+    // you linger on, so it's a distinct (smaller, jagged) silhouette rather
+    // than reusing the rough-patch shape at a smaller scale.
+    this.drawObstacleTexture();
   }
 
   create(): void {
     this.scene.start("intro");
-  }
-
-  private drawRoadBackgroundTexture(): void {
-    const g = this.add.graphics();
-    g.fillStyle(ROAD_COLORS.ground, 1);
-    g.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    g.fillStyle(ROAD_COLORS.road, 1);
-    g.fillRect(ROAD_X, 0, ROAD_WIDTH, CANVAS_HEIGHT);
-    g.fillStyle(ROAD_COLORS.edge, 1);
-    g.fillRect(ROAD_X - 4, 0, 4, CANVAS_HEIGHT);
-    g.fillRect(ROAD_X + ROAD_WIDTH, 0, 4, CANVAS_HEIGHT);
-    g.generateTexture("road-background", CANVAS_WIDTH, CANVAS_HEIGHT);
-    g.destroy();
-  }
-
-  private drawRoadDividerTexture(): void {
-    const g = this.add.graphics();
-    const textureHeight = DIVIDER_DASH_HEIGHT + DIVIDER_GAP_HEIGHT;
-    g.fillStyle(ROAD_COLORS.divider, 1);
-    g.fillRect(ROAD_WIDTH / 2 - 3, 0, 6, DIVIDER_DASH_HEIGHT);
-    g.generateTexture("road-divider", ROAD_WIDTH, textureHeight);
-    g.destroy();
   }
 
   // A jagged, organic-looking silhouette instead of a clean rectangle/ellipse
@@ -137,6 +121,17 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(TERRAIN_COLORS.oilSheen, 0.5);
     this.drawIrregularBlob(g, w * 0.42, h * 0.42, w * 0.16, h * 0.11, 10, 0.45);
     g.generateTexture("hazard-oil", w, h);
+    g.destroy();
+  }
+
+  private drawObstacleTexture(): void {
+    const g = this.add.graphics();
+    const size = OBSTACLES.size;
+    g.fillStyle(WALLS.rockColor, 1);
+    this.drawIrregularBlob(g, size / 2, size / 2, size * 0.46, size * 0.46, 9, 0.4);
+    g.fillStyle(WALLS.rockSpeckleColor, 0.8);
+    this.drawIrregularBlob(g, size * 0.42, size * 0.42, size * 0.16, size * 0.16, 7, 0.4);
+    g.generateTexture("hazard-obstacle", size, size);
     g.destroy();
   }
 }

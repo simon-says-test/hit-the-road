@@ -1,12 +1,14 @@
 import Phaser from "phaser";
 import { DEPTHS } from "../config";
 
-export type HazardType = "rough" | "oil";
+// "rough"/"oil" are continuous patches a car drives over (no despawn on
+// contact, keeps affecting whoever's overlapping every frame). "obstacle"
+// is the odd one out — a one-time bump (flat damage + speed penalty) that
+// despawns itself the first time anything hits it, since it's a discrete
+// object you clip, not ground you linger on (see GameScene's hazard-contact
+// handling for where that distinction is actually applied).
+export type HazardType = "rough" | "oil" | "obstacle";
 
-// A terrain patch the player drives over/through, not a one-shot obstacle —
-// GameScene no longer despawns these on contact; they scroll off the bottom
-// of the screen like any other world prop (see GameScene.updateWorldProps),
-// continuing to affect the player every frame they're overlapping it.
 export class Hazard extends Phaser.Physics.Arcade.Image {
   type: HazardType = "rough";
 
@@ -17,6 +19,9 @@ export class Hazard extends Phaser.Physics.Arcade.Image {
     this.setDepth(DEPTHS.hazard);
   }
 
+  // Hazards are placed once around the generated loop at race start and
+  // stay fixed for the whole race — no scrolling/velocity to set up, unlike
+  // the old endless-runner model's spawn-and-drift-down pattern.
   spawn(type: HazardType, x: number, y: number, texture: string): void {
     this.type = type;
     this.setTexture(texture);
@@ -25,13 +30,8 @@ export class Hazard extends Phaser.Physics.Arcade.Image {
     this.setVisible(true);
   }
 
-  drive(velocityY: number): void {
-    this.setVelocityY(velocityY);
-  }
-
   despawn(): void {
     this.setActive(false);
     this.setVisible(false);
-    this.setVelocity(0, 0);
   }
 }

@@ -2,6 +2,7 @@ import {
   WeaponId,
   WEAPONS,
   SIDE_GUN_SWEEP,
+  SIDE_GUN_MOUNTS,
   TURRET_STABILITY,
   WEAPON_INSTABILITY,
   DRIFT,
@@ -12,7 +13,6 @@ export interface WeaponState {
   cooldownRemaining: number;
   sweepAngleDeg: number;
   turretSpreadDeg: number;
-  rocketSpreadDeg: number;
 }
 
 export interface WeaponUpdateParams {
@@ -34,6 +34,25 @@ export interface FireResult {
   projectileSpeed: number;
 }
 
+// Side-gun mount geometry — shared by GameScene's projectile spawn point and
+// HudSystem's in-world aim meter, which both need the exact same mount
+// position/angle so the meter accurately previews where a shot will appear.
+export function sideGunAngleDeg(side: -1 | 1, sweepAngleDeg: number): number {
+  return side < 0 ? -SIDE_GUN_MOUNTS.centerAngleDeg + sweepAngleDeg : SIDE_GUN_MOUNTS.centerAngleDeg - sweepAngleDeg;
+}
+
+export function sideGunMountPosition(
+  x: number,
+  y: number,
+  headingDeg: number,
+  displayWidth: number,
+  side: -1 | 1
+): { x: number; y: number } {
+  const headingRad = (headingDeg * Math.PI) / 180;
+  const offset = side * (displayWidth / 2 + SIDE_GUN_MOUNTS.extraOffsetPx);
+  return { x: x + offset * Math.cos(headingRad), y: y + offset * Math.sin(headingRad) };
+}
+
 const WEAPON_IDS: WeaponId[] = ["rocket", "sideguns", "turret"];
 
 export class WeaponController {
@@ -43,14 +62,13 @@ export class WeaponController {
 
   constructor() {
     this.states = {
-      rocket: { ammo: WEAPONS.rocket.maxAmmo, cooldownRemaining: 0, sweepAngleDeg: 0, turretSpreadDeg: 0, rocketSpreadDeg: 0 },
-      sideguns: { ammo: WEAPONS.sideguns.maxAmmo, cooldownRemaining: 0, sweepAngleDeg: 0, turretSpreadDeg: 0, rocketSpreadDeg: 0 },
+      rocket: { ammo: WEAPONS.rocket.maxAmmo, cooldownRemaining: 0, sweepAngleDeg: 0, turretSpreadDeg: 0 },
+      sideguns: { ammo: WEAPONS.sideguns.maxAmmo, cooldownRemaining: 0, sweepAngleDeg: 0, turretSpreadDeg: 0 },
       turret: {
         ammo: WEAPONS.turret.maxAmmo,
         cooldownRemaining: 0,
         sweepAngleDeg: 0,
         turretSpreadDeg: TURRET_STABILITY.baseSpreadDeg,
-        rocketSpreadDeg: 0,
       },
     };
   }
@@ -101,9 +119,6 @@ export class WeaponController {
     if (params.offRoad) targetSpread += TURRET_STABILITY.offroadSpreadDeg;
     if (params.drifting) targetSpread *= DRIFT.weaponInstabilityMultiplier;
     turret.turretSpreadDeg = lerp(turret.turretSpreadDeg, targetSpread, TURRET_STABILITY.smoothing);
-
-    const rocket = this.states.rocket;
-    rocket.rocketSpreadDeg = lerp(rocket.rocketSpreadDeg, sharedInstabilityDeg, WEAPON_INSTABILITY.smoothing);
   }
 
   tryFire(weapon: WeaponId, turretAimDeg = 0): FireResult | null {
@@ -120,12 +135,9 @@ export class WeaponController {
     } else if (weapon === "turret") {
       const spreadRoll = (pseudoRandom(state.cooldownRemaining + state.ammo) - 0.5) * 2 * state.turretSpreadDeg;
       angleDeg = turretAimDeg + spreadRoll;
-    } else {
-      // rocket — normally dead ahead, but the shared speed/rough-terrain
-      // instability above can still throw it off a little.
-      const spreadRoll = (pseudoRandom(state.cooldownRemaining + state.ammo + 17) - 0.5) * 2 * state.rocketSpreadDeg;
-      angleDeg = spreadRoll;
     }
+    // rocket — always dead ahead, per gameplay.md ("fires straight ahead
+    // along the road"); unlike the other two it has no instability mechanic.
 
     return { weapon, angleDeg, damage: config.damage, projectileSpeed: config.projectileSpeed };
   }

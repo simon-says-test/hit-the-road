@@ -77,14 +77,14 @@ describe("WeaponController", () => {
     expect(weapons.getState("turret").turretSpreadDeg).toBeGreaterThan(baseline);
   });
 
-  it("rocket gains spread at speed/on rough terrain, and stays accurate otherwise", () => {
+  it("rocket always fires dead ahead, regardless of speed or rough terrain", () => {
     const weapons = new WeaponController();
     for (let i = 0; i < 30; i++) weapons.update(50, NO_HANDLING);
-    expect(weapons.getState("rocket").rocketSpreadDeg).toBeCloseTo(0);
+    expect(weapons.tryFire("rocket")!.angleDeg).toBe(0);
 
     const shaky = new WeaponController();
     for (let i = 0; i < 30; i++) shaky.update(50, { ...NO_HANDLING, speedFraction: 1, onRoughTerrain: true });
-    expect(shaky.getState("rocket").rocketSpreadDeg).toBeGreaterThan(0);
+    expect(shaky.tryFire("rocket")!.angleDeg).toBe(0);
   });
 
   it("side-gun sweep jitters more at speed/on rough terrain, even without steering", () => {

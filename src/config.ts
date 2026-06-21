@@ -1,10 +1,45 @@
-export const CANVAS_WIDTH = 480;
-export const CANVAS_HEIGHT = 720;
+// Landscape now rather than the old portrait scroller — a closed-loop track
+// that winds and turns sideways (not just up) needs horizontal room, and a
+// minimap (added once rivals are back) wants a free corner to live in.
+export const CANVAS_WIDTH = 960;
+export const CANVAS_HEIGHT = 600;
 
-export const ROAD_WIDTH = 320;
-export const ROAD_X = (CANVAS_WIDTH - ROAD_WIDTH) / 2;
+// Paved road width, constant along the whole track (only the rock walls
+// beyond its edges meander — see WALLS). Widened from the old 320 now that
+// cars have a whole loop to share with rivals and need room to overtake —
+// widened further still (360 -> 420) after playtesting the first generated
+// loop found the margin for error in a corner too thin.
+export const ROAD_WIDTH = 420;
 
-export const PLAYER_Y = CANVAS_HEIGHT - 110;
+// Procedurally generates one closed-loop spline track per race (see
+// entities/track.ts) — control points scattered around a circle, fit with a
+// closed Catmull-Rom spline, then resampled at fixed arc-length spacing so
+// every consumer (wall rendering, AI lookahead, lap progress) can treat `s`
+// as a uniform distance along the loop.
+export const TRACK_GEN = {
+  controlPoints: 12,
+  baseRadius: 1900,
+  // Fraction of baseRadius each control point's own radius can deviate by —
+  // what actually makes the loop twist/narrow/widen instead of being a
+  // perfect circle. Lowered from an initial 0.4 after playtesting found
+  // that level of jitter produced local curvature tighter than the car's
+  // turn rate could comfortably follow — driving dead straight (no
+  // steering at all) went off-road within about a second even on the
+  // "easy" parts of the loop.
+  radiusJitter: 0.22,
+  // Fraction of a control point's own angular segment it can be nudged by.
+  // Kept under 1 so consecutive points never reorder, which would make the
+  // closed spline self-intersect. Lowered alongside radiusJitter for the
+  // same reason — bunched-up control points were producing sharper bends
+  // than intended.
+  angleJitterFraction: 0.18,
+  // Dense Catmull-Rom subdivisions per control-point segment, sampled before
+  // the arc-length resampling pass below — not the final centerline itself,
+  // since Catmull-Rom's own parameter isn't evenly spaced by distance.
+  segmentsPerControlPoint: 24,
+  // Spacing, in px, between the final resampled centerline points.
+  sampleSpacing: 24,
+};
 
 // Applied to both the player and every enemy archetype's sprite — shrinking
 // cars from the source art's native size leaves more road visible and more
@@ -18,6 +53,10 @@ export const CAR_SCALE = 0.6;
 // everything that drives over them; projectiles sit above cars so a shot
 // flying over a car right before impact stays visible.
 export const DEPTHS = {
+  // The whole generated track (road ribbon + rock walls + centerline
+  // dashes) is now one static Graphics object drawn once at race start
+  // (see GameScene.drawTrack), rather than a separate scrolling road plus a
+  // per-frame-redrawn wall layer — so it only needs the one depth.
   roadBackground: -10,
   hazard: -7,
   pickup: -3,
@@ -38,9 +77,19 @@ export const PLAYER_HANDLING = {
   coastFriction: 160,
   maxForwardSpeed: 620,
   maxReverseSpeed: 220,
-  minTurnSpeed: 160,
-  maxTurnSpeed: 360,
+  // Steering now turns the car's heading (deg/sec) rather than setting a
+  // lane-drift lateral velocity — sluggish at low speed, sharpest at top
+  // speed, same min/max-ramp-by-speed idea as the old lateral model. Raised
+  // from an initial 70/170 after playtesting found the car couldn't turn
+  // fast enough at speed to comfortably follow the generated loop's curves.
+  minTurnRateDeg: 90,
+  maxTurnRateDeg: 230,
   offroadDrag: 260,
+  // How fast the car's actual velocity direction snaps toward its heading
+  // each frame while gripping (not drifting) — see DRIFT.slipEase for the
+  // much slower equivalent while drifting, which is what makes a drift
+  // actually slide rather than just turn sharper.
+  velocityGripEase: 0.6,
 };
 
 export const PLAYER_HEALTH = {
@@ -53,11 +102,14 @@ export const DRIFT = {
   turnMultiplier: 1.8,
   speedDrainPerSecond: 90,
   weaponInstabilityMultiplier: 2.2,
+  // How fast the car's actual velocity direction follows its heading while
+  // drifting — much slower than PLAYER_HANDLING.velocityGripEase, so the
+  // car's momentum keeps carrying it along the old heading for a beat after
+  // turning, i.e. an actual slide rather than just a sharper turn.
+  slipEase: 0.06,
 };
 
 export type EnemyArchetypeId = "chaser" | "shooter" | "heavy" | "bomber";
-
-export type ApproachDirection = "behind" | "side";
 
 export interface EnemyArchetypeConfig {
   id: EnemyArchetypeId;
@@ -65,8 +117,24 @@ export interface EnemyArchetypeConfig {
   tint: number;
   health: number;
   speedMultiplier: number;
-  approachFrom: ApproachDirection;
-  lateralSpeed: number;
+  // Relative pick weight when the 5 race rivals are assigned an archetype
+  // each at race start (see RIVALS below) — all 4 are available from the
+  // start now that rivals are a fixed roster, not a distance-gated unlock.
+  weight: number;
+  // Own steering authority (deg/sec, same idea as PLAYER_HANDLING's turn
+  // rate) — replaces the old lane-drift `lateralSpeed` now that rivals
+  // drive a real 2D loop and need to actually turn to follow it, not just
+  // shift sideways on a fixed lane.
+  maxTurnRateDeg: number;
+  // How strongly this archetype steers away from whichever other rival is
+  // currently closest (see enemyBehaviors.computeTargetHeading) — replaces
+  // the old shared aggressive/passive avoidance weight pair with an
+  // explicit per-archetype value, since four distinct archetypes warrant
+  // more than a 2-value split. Heavy's near-zero value is what keeps its
+  // "doesn't really dodge traffic" identity now that it has *some*
+  // steering authority (a literal zero turn rate would crash it into the
+  // first bend, unlike the old straight-road model).
+  avoidanceWeight: number;
   chasesPlayer: boolean;
   keepsDistance: boolean;
   fireCooldown: number;
@@ -75,6 +143,9 @@ export interface EnemyArchetypeConfig {
   scoreValue: number;
 }
 
+// No archetype approaches from the road's side margin any more — the
+// rocky walls now occupy that space (see WALLS below), so every rival
+// closes/falls back along the same ahead/behind axis as the player.
 export const ENEMY_ARCHETYPES: Record<EnemyArchetypeId, EnemyArchetypeConfig> = {
   chaser: {
     id: "chaser",
@@ -82,8 +153,9 @@ export const ENEMY_ARCHETYPES: Record<EnemyArchetypeId, EnemyArchetypeConfig> = 
     tint: 0xcc6655,
     health: 45,
     speedMultiplier: 1.05,
-    approachFrom: "behind",
-    lateralSpeed: 140,
+    weight: 3,
+    maxTurnRateDeg: 230,
+    avoidanceWeight: 0.25,
     chasesPlayer: true,
     keepsDistance: false,
     fireCooldown: 0,
@@ -97,8 +169,9 @@ export const ENEMY_ARCHETYPES: Record<EnemyArchetypeId, EnemyArchetypeConfig> = 
     tint: 0xc9c977,
     health: 60,
     speedMultiplier: 0.85,
-    approachFrom: "side",
-    lateralSpeed: 100,
+    weight: 3,
+    maxTurnRateDeg: 200,
+    avoidanceWeight: 0.7,
     chasesPlayer: false,
     keepsDistance: true,
     fireCooldown: 1400,
@@ -112,8 +185,9 @@ export const ENEMY_ARCHETYPES: Record<EnemyArchetypeId, EnemyArchetypeConfig> = 
     tint: 0x7a9466,
     health: 160,
     speedMultiplier: 0.6,
-    approachFrom: "side",
-    lateralSpeed: 0,
+    weight: 2,
+    maxTurnRateDeg: 80,
+    avoidanceWeight: 0.05,
     chasesPlayer: false,
     keepsDistance: false,
     fireCooldown: 0,
@@ -127,8 +201,9 @@ export const ENEMY_ARCHETYPES: Record<EnemyArchetypeId, EnemyArchetypeConfig> = 
     tint: 0xe28a44,
     health: 24,
     speedMultiplier: 1.1,
-    approachFrom: "behind",
-    lateralSpeed: 200,
+    weight: 2,
+    maxTurnRateDeg: 240,
+    avoidanceWeight: 0.2,
     chasesPlayer: true,
     keepsDistance: false,
     fireCooldown: 0,
@@ -138,62 +213,128 @@ export const ENEMY_ARCHETYPES: Record<EnemyArchetypeId, EnemyArchetypeConfig> = 
   },
 };
 
-export const ENEMY_UNLOCKS: { minScore: number; id: EnemyArchetypeId; weight: number }[] = [
-  { minScore: 0, id: "chaser", weight: 3 },
-  { minScore: 120, id: "shooter", weight: 3 },
-  { minScore: 260, id: "heavy", weight: 2 },
-  { minScore: 420, id: "bomber", weight: 2 },
-];
-
-export const ENEMY_SPAWN = {
+// Exactly 5 persistent rival cars for the whole race, all always active and
+// positioned in real 2D world space from the start (no more timed spawn
+// pool, and no more on/off-screen activation — with only 5 cars on a finite
+// loop there's no need for either). startOffsets place them in a small grid
+// just behind the player's own start point: `s` is arc-length offset from
+// the player's start (negative = ahead), `lateral` is the signed offset
+// from centerline (see track.ts) at that point — a believable grid-start
+// look rather than all 5 stacked on the same spot.
+export const RIVALS = {
+  count: 5,
   // Enemies are meant to be roughly equal to the player in raw speed, not
   // categorically slower or faster — the actual edge in a chase should come
   // from avoiding obstacles and combat (see DAMAGE_SLOW below), not from a
-  // hard speed advantage built into the spawn config. baseApproachSpeed is
-  // comfortably below typical cruising speed early on (outrunning a passive
-  // chaser stays easy), and maxApproachSpeed × the aggressive archetypes'
-  // speedMultiplier (chaser 1.05, bomber 1.1) lands close to — bomber just
-  // past — the player's own maxForwardSpeed (620) at peak difficulty, so a
-  // flat-out player can usually still out-leg them, but only barely.
-  baseApproachSpeed: 260,
-  maxApproachSpeed: 580,
-  approachSpeedPerScore: 1.0,
-  // Slower cadence than before, plus the hard concurrency cap below — fewer
-  // cars on screen at once so each one reads as an opponent to out-drive
-  // rather than part of an undifferentiated swarm.
-  spawnIntervalInitial: 2200,
-  spawnIntervalMin: 1000,
-  spawnIntervalScoreFactor: 1.5,
-  // Hard cap on simultaneously active enemies, checked before every spawn
-  // attempt (a maxed-out group just skips that attempt) — independent of
-  // spawn interval, so late-game interval shrinkage can't pack the road full.
-  maxConcurrent: 5,
-  minSpawnXGap: 70,
-  spawnMargin: 24,
-  despawnMarginY: 80,
-  // "side" archetypes (shooter, heavy) merge in from the road's left/right
-  // edge already level with the player, rather than spawning off the top of
-  // the screen like old front-oncoming traffic — these bound how far ahead
-  // of the player's current y they can appear.
-  sideSpawnAheadMin: 40,
-  sideSpawnAheadMax: 260,
+  // hard speed advantage built into config. baseApproachSpeed × the
+  // aggressive archetypes' speedMultiplier (chaser 1.05, bomber 1.1) lands
+  // close to — bomber just past — the player's own maxForwardSpeed (620),
+  // so a flat-out player can usually still out-leg them, but only barely.
+  // Raised from an initial 560 after playtesting found rivals felt
+  // sluggish/passive even before factoring in archetype multipliers.
+  baseApproachSpeed: 600,
+  startOffsets: [
+    { s: -60, lateral: -100 },
+    { s: -60, lateral: 100 },
+    { s: -130, lateral: -150 },
+    { s: -130, lateral: 0 },
+    { s: -130, lateral: 150 },
+  ],
 };
 
-// Enemy "AI": steering toward a target lateral velocity is smoothed (inertia,
-// so cars drift into a line change rather than snapping sideways like a
-// robot) and nudged away from whichever other enemy is currently closest
-// (Euclidean, in screen space) so they don't simply stack on top of each
-// other. Aggressive archetypes (chasesPlayer: true) only weakly avoid —
-// they're trying to ram, so a collision with another car is an acceptable
-// side effect, not something they steer hard to prevent.
+// Keeps every rival a felt presence for the whole race, in both
+// directions — not just "lets a skilled player close a gap" (the old
+// ahead-only version): a rival that's pulled clearly ahead occasionally
+// slows down, and a rival that's fallen clearly behind occasionally speeds
+// up, so a rival's own AI/speed quality doesn't determine whether it stays
+// relevant. "Ahead"/"behind" is total race progress (laps × track length +
+// arc-length position, the loop-track equivalent of the old screen-relative
+// gap). Each rival independently rolls for its own activation, so it reads
+// as that car catching a break, not a global rubber band snapping everyone
+// to the same gap.
+export const RUBBER_BAND = {
+  minLeadPx: 250,
+  minDeficitPx: 250,
+  // Raised from an initial 0.15 (ahead-only) — playtesting found rivals
+  // that fell behind (slower archetypes especially) almost never closed
+  // the gap again within a typical race, since the old version only ever
+  // slowed down a rival that was ahead.
+  activationChancePerSecond: 0.4,
+  durationMs: 2500,
+  aheadSpeedMultiplier: 0.75,
+  behindSpeedMultiplier: 1.45,
+};
+
+// The race is won by completing a fixed number of laps of the generated
+// loop, ranked by finishing order against the 5 rivals — not an endless
+// distance chase any more. Not yet consumed by GameScene (lap counting and
+// the finish condition land in Phase 2 of the loop-track rework), but
+// defined now so nothing still references the old distance-based field.
+export const TRACK = {
+  lapsToWin: 3,
+};
+
+// Enemy "AI": each rival's target heading blends (a) a lookahead point on
+// the track centerline (the baseline "stay on the road" behavior every
+// archetype now needs, see enemyBehaviors.computeTargetHeading), (b) a pull
+// toward or away from the player depending on archetype, and (c) a push
+// away from whichever other rival is currently closest, within
+// avoidanceRadius (Euclidean, world space) — weighted per archetype via
+// EnemyArchetypeConfig.avoidanceWeight. The car then turns toward that
+// blended target at its own maxTurnRateDeg, the same rate-limited-turn
+// idea PLAYER_HANDLING uses, which is what gives steering its inertia (a
+// turn rate cap, not an exponential smoothing factor).
 export const ENEMY_AI = {
-  steeringSmoothing: 0.12,
   avoidanceRadius: 70,
-  aggressiveAvoidanceWeight: 0.3,
-  passiveAvoidanceWeight: 0.75,
+  // How far ahead along the track (arc-length px) a rival aims its
+  // baseline steering target — short enough to hug the centerline through
+  // tight bends, long enough not to read as twitchy on straights.
+  lookaheadDistPx: 220,
+  // How strongly chasesPlayer archetypes blend a direct pull toward the
+  // player's actual position into their target heading, scaled down by
+  // distance beyond chaseRange so a chaser far from the player mostly just
+  // races the track instead of cutting blindly toward a player it can't
+  // see around the next bend. Raised from an initial 0.6/260 after
+  // playtesting found chasers read as too passive/track-bound, rarely
+  // committing to an actual ram attempt.
+  chaseWeight: 0.8,
+  chaseRange: 380,
+  // A keepsDistance archetype (Shooter) steers slightly away from the
+  // player when closer than this, instead of holding its line — on top of
+  // (not instead of) slowing its approach speed, see EnemyCar.drive.
+  shooterPreferredGapPx: 140,
+  shooterAvoidWeight: 0.3,
+  // canFire() only allows a shot within this distance — without it, a
+  // shooter that's fallen far behind/ahead on the track (no line-of-sight
+  // logic exists, so nothing else stops it) keeps firing blind, ammo-wasting
+  // shots toward a player it has no realistic chance of hitting. Set a bit
+  // past chaseRange so a shooter that's just lost ground can still take a
+  // shot before the gap closes again.
+  shooterFireRangePx: 500,
+  // Speed bleeds off ahead of a sharp upcoming bend (the heading difference
+  // between a rival's current heading and its own lookahead target) so AI
+  // doesn't take corners at a flat-out speed no turn rate could follow —
+  // scales linearly from full speed at 0° up to minSpeedFactor at
+  // maxAngleDeg and beyond.
+  curvatureSlowdown: {
+    maxAngleDeg: 70,
+    minSpeedFactor: 0.55,
+  },
 };
 
 export const SCORE_DISTANCE_DIVISOR = 10;
+
+// The world is now much larger than the camera viewport (a full closed-loop
+// track, with the camera following the player around it), so projectiles
+// can no longer be culled by "off the edge of the canvas" the way the old
+// fixed-camera scroller did — a fixed lifetime after firing is the
+// generalized equivalent regardless of travel direction. Raised from an
+// initial 2000ms — at Shooter's projectileSpeed (480), that capped its
+// effective range at ~960px, well under typical gaps once it fell behind
+// the player, so its shots were timing out before they could ever land
+// (read as "enemies only fire when in front," since that's the only
+// situation close enough for a shot to reach).
+export const PROJECTILE_LIFETIME_MS = 2800;
 
 export type WeaponId = "rocket" | "sideguns" | "turret";
 
@@ -251,26 +392,31 @@ export const SIDE_GUN_MOUNTS = {
   extraOffsetPx: 6,
 };
 
-// In-world meter drawn above the player car showing the current weapon's
-// aim/readiness state (sweep angle, spread, or reload) — separate from the
-// numeric HUD text, which stays as a precise readout in the corner.
+// In-world meter floating just ahead of the player car (along its current
+// heading) showing the current weapon's aim state (sweep angle or spread) —
+// rocket has no entry here any more since dead-ahead-only firing has no aim
+// state worth showing in-world; its reload progress lives inline with its
+// ammo count in WEAPON_SIDEBAR instead (see GameScene.updateWeaponSidebar).
 export const WEAPON_METER = {
   offsetY: 22,
-  barWidth: 44,
-  barHeight: 6,
   arcRadius: 30,
 };
 
-// A persistent sidebar in the dead-ground margin to the road's right (the
-// only mostly-empty stretch of the canvas) listing all three weapons, their
-// select key, and current ammo, with the equipped one highlighted — added
-// so the weapon roster and how to switch is visible at a glance rather than
-// only discoverable via the 1/2/3 keys and the single-line HUD text.
+// A persistent sidebar pinned to the bottom-right corner of the screen
+// listing all three weapons, their select key, current ammo, and a reload/
+// readiness bar (cooldownRemaining / fireCooldown, the same value the old
+// in-world rocket meter showed) inline with the ammo count — with the
+// equipped weapon's row highlighted. Bottom-right keeps it clear of the
+// main camera's followed action in the middle of the screen, now that the
+// world scrolls in every direction rather than just vertically past a
+// fixed lane.
 export const WEAPON_SIDEBAR = {
-  x: 406,
-  yStart: 220,
+  x: 800,
+  yStart: 400,
   rowHeight: 64,
   swatchSize: 14,
+  reloadBarWidth: 40,
+  reloadBarHeight: 6,
 };
 
 export const SIDE_GUN_SWEEP = {
@@ -337,8 +483,8 @@ export const COLLISION_SHUNT = {
   recoilSpeed: 160,
 };
 
-// With enemy and player top speeds roughly at parity (see ENEMY_SPAWN
-// above), a discrete combat hit — not off-road drain, not the ram shunt,
+// With enemy and player top speeds roughly at parity (see RIVALS above), a
+// discrete combat hit — not off-road drain, not the ram shunt,
 // just landing a weapon shot or ram damage — also temporarily caps the
 // victim's top speed. This is what actually creates separation in a chase:
 // land a hit and the gap opens because *they* slowed, not because of a
@@ -353,17 +499,43 @@ export const DAMAGE_SLOW = {
   maxSpeedFactor: 0.7,
 };
 
-// Terrain hazards are zones the player drives over/through, not one-shot
-// obstacles — no health cost, no despawn-on-contact. "rough" is broken
-// road/rough ground (extra drag while inside it, see ROUGH_TERRAIN below);
-// "oil" is a slick (temporarily impairs steering, see OIL_SLICK below).
+// Terrain hazards are zones the player (and rivals) drive over/through, not
+// one-shot obstacles — no health cost, no despawn-on-contact. "rough" is
+// broken road/rough ground (extra drag while inside it, see ROUGH_TERRAIN
+// below); "oil" is a slick (temporarily impairs steering, see OIL_SLICK
+// below). The track is generated once and fixed for the whole race now, so
+// hazards are placed once around the loop at race start (see
+// GameScene.spawnHazards) rather than spawned continuously down a
+// scrolling road — these counts are per-race totals, not a spawn rate.
 export const HAZARDS = {
-  spawnIntervalInitial: 4200,
-  spawnIntervalMin: 1800,
-  spawnIntervalScoreFactor: 3,
-  spawnMargin: 24,
+  roughCount: 10,
+  oilCount: 8,
   patchWidth: 110,
   patchHeight: 150,
+  // Minimum arc-length gap between any two placements (including the
+  // start/finish line itself) so patches don't cluster unreadably and the
+  // player never spawns directly on top of one.
+  minSpacingPx: 220,
+  startClearancePx: 320,
+  // Placed within the paved width, margin in from each edge so a patch is
+  // never flush against the rock wall.
+  lateralMargin: 30,
+};
+
+// A small discrete rock/debris pile — unlike rough/oil's continuous
+// "you're standing on it" effect, this is a one-time bump: a flat
+// damage+speed hit on first contact, then it's gone (despawned), the same
+// "physical obstacle you clip" read the old debris/barrier model had before
+// the rough-terrain/oil-slick rework, now as a third hazard type alongside
+// (not instead of) the continuous patches.
+export const OBSTACLES = {
+  count: 6,
+  size: 30,
+  damage: 12,
+  // One-time multiply applied to current speed on contact (player) or to
+  // that frame's ownSpeed (enemy) — a hard bump should cost real speed, not
+  // just a glancing scrape.
+  speedPenaltyFactor: 0.5,
 };
 
 export const ROUGH_TERRAIN = {
@@ -388,12 +560,70 @@ export const OIL_SLICK = {
   // doesn't shorten the post-exit effect.
   effectDurationMs: 1400,
   controlMultiplier: 0.3,
-  driftStrength: 200,
-  // Enemies don't steer via turnSpeed like the player — instead the same
-  // drift-bias kick is added directly to their velocity for the duration,
-  // for the same "harder to control" read.
-  enemyDriftStrength: 140,
+  // Degrees the player's velocity direction is biased away from heading
+  // while oil-slicked (was a raw px/sec lateral push under the old
+  // lane-drift model — now expressed as an angle since velocity direction
+  // is heading-relative, see playerPhysics.ts).
+  driftStrengthDeg: 45,
+  // Enemies get the same reduced-steering-authority treatment (their own
+  // turn rate × controlMultiplier) plus a degree-based veer added on top of
+  // their normal turn-toward-target heading, the 2D equivalent of the old
+  // px/sec lateral kick now that heading is the thing being perturbed.
+  enemyDriftStrengthDeg: 35,
 };
+
+// Rocky canyon walls flank the road just off its paved edges, at a distance
+// that meanders over the course of the race (see track.ts's wallBoundsAt) —
+// a hard boundary any car (player or rival) can be pushed into, not just
+// open shoulder. Contact applies extra drag for as long as it lasts (like
+// off-road driving but harsher), and the outward component of lateral
+// movement is clamped so a car can't drive/get shoved straight through the
+// rock — but health damage is a one-time hit on the frame contact begins
+// (see PlayerCar.drive/EnemyCar.drive and wallImpactDamage below), scaled by
+// how fast the car was going at that instant. Scraping along a wall while
+// steering back onto the road doesn't keep costing health the way the old
+// per-second drain did; only the initial impact does.
+export const WALLS = {
+  minOffset: 40,
+  maxOffset: 110,
+  // Wavelength of the canyon's meander, in arc-length px along the track
+  // centerline (see track.ts) — left/right use different frequency+phase so
+  // the canyon narrows/widens asymmetrically rather than both walls
+  // mirroring each other.
+  meanderFreqLeft: 1 / 900,
+  meanderFreqRight: 1 / 700,
+  rightPhaseOffset: 2.1,
+  dragPerSecondPlayer: 280,
+  // Below this speed, clipping the wall is just a slow nudge — no damage,
+  // same idea as a real car grazing a barrier at a crawl vs. into it at speed.
+  minImpactSpeed: 150,
+  // Damage dealt for an impact at or above each car's own max speed; scales
+  // linearly down to 0 at minImpactSpeed (see wallImpactDamage). Lowered
+  // from the old continuous drain's effective per-hit cost after
+  // playtesting — a single bad clip shouldn't chew through most of the
+  // player's health, even at top speed.
+  maxImpactDamagePlayer: 22,
+  maxImpactDamageEnemy: 35,
+  enemySpeedMultiplier: 0.4,
+  // Clearly darker/more saturated than ROAD_COLORS.ground (0x4a4636) — an
+  // earlier pass used a much closer tone (0x554a3c) that was technically
+  // rendering correctly but unreadable at a glance against the ground;
+  // playtesting (a screenshot pixel-sample, not just eyeballing) caught it.
+  rockColor: 0x2e2418,
+  rockSpeckleColor: 0x9c8a65,
+};
+
+// One-time wall-impact damage, linear in speed from 0 at minImpactSpeed up
+// to maxDamage at maxSpeed (clamped at both ends) — shared by
+// PlayerCar.drive and EnemyCar.drive so a player clip and a rival clip are
+// judged by the same rule, just against each side's own max speed and own
+// damage cap.
+export function wallImpactDamage(speed: number, maxDamage: number, maxSpeed: number): number {
+  const { minImpactSpeed } = WALLS;
+  if (speed <= minImpactSpeed) return 0;
+  const t = Math.min(1, (speed - minImpactSpeed) / (maxSpeed - minImpactSpeed));
+  return maxDamage * t;
+}
 
 // Small graphical health bars drawn above the player and every active
 // enemy (see GameScene.drawHealthBars) — a glanceable supplement to the
@@ -412,6 +642,14 @@ export const CRATE_SPAWN = {
   intervalMs: 16000,
   intervalJitterMs: 6000,
 };
+
+// Random interval until the next standalone crate spawn, jittered evenly
+// around CRATE_SPAWN.intervalMs so crates don't land on an exact, learnable
+// metronome — shared by PickupSystem's initial timer and every re-arm after
+// a spawn.
+export function nextCrateIntervalMs(rng: () => number = Math.random): number {
+  return CRATE_SPAWN.intervalMs + (rng() * 2 - 1) * CRATE_SPAWN.intervalJitterMs;
+}
 
 // Loaded fx/hazard art comes from packs with brighter house palettes than this
 // game's wasteland look (see CLAUDE.md's Assets section) — these tints pull

@@ -30,9 +30,20 @@ The `docs` folder contains specification documents (e.g. `specification.md`) des
 ## Testing
 
 - Use Vitest for unit tests (TS-native, shares the Vite config/transform pipeline). Add tests for extracted pure logic — entity movement/handling math, AI behaviors, weapon aim/fire math, scoring/difficulty curve — as that logic lands in `src/entities/`/`src/config.ts`, rather than deferring indefinitely.
-- Phaser scene wiring, rendering, and input plumbing aren't worth unit-testing — verify those by running `npm run dev` and playing through the affected behavior (movement, collisions, scoring, restart) plus any new feature's edge cases.
+- For Phaser scene wiring/behavior that reduces to checkable game state (lap counts, health, position, ammo, hazard counts, race outcomes), add an E2E test in `e2e/tests/` (`npm run test:e2e`) against `window.__GAME_STATE__` (see `GameScene.updateE2EGameState()`) rather than only re-verifying it by hand — this is a real regression suite, not a one-off check, so prefer expanding it over writing a throwaway script when the thing being verified is something a future change could plausibly break again. Use `?seed=` for anything position/layout-dependent so assertions don't flake.
+- Pure visual/alignment things that don't reduce to state (does the meter line up with the sprite, does a color read correctly) still aren't worth unit- or E2E-testing — verify those by running `npm run dev`, or the `playtest` skill for a quick scripted/headless visual check, and playing through the affected behavior plus any new feature's edge cases.
 
 ## Troubleshooting
 
 - If you hit any issues debugging, testing etc. make a note of your solution in `docs/troubleshooting.md` to help you next time.
 - Reference `docs/troubleshooting.md`  for techniques on how to solve issues encountered.
+
+## Reducing prompting
+
+- Keep track of what prompts you are asking me to confirm and ask, could these be reduced in some way e.g. if you use a temporary script to run tests, maybe keep the name distinct and consistent so I only accept once for all projects. If you need to create/update a file then do that using the appropriate tool rather than running a bash command, if this will reduce prompting. If you find good ways to reduce prompts, consider adding to here at the end.
+- For throwaway Playwright/headless-browser driver scripts (debugging via the `playtest` skill or similar), reuse a single fixed filename (e.g. `scratch-playtest.mjs` at the repo root) across every iteration of a debugging session, editing its contents in place with Write/Edit rather than writing a new `*2.mjs`/`*3.mjs` each time — a new filename means a new `node <name>.mjs` command string, which re-prompts even though it's the same kind of action already approved. Always author file contents with Write/Edit, never a Bash heredoc (`cat > file << EOF`), even for scratch files — keeps file creation off the list of things that need a Bash approval at all.
+
+## Performance
+
+- Consider which steps for solving issues are taking the most time and if there are consistent issues e.g. maybe testing is taking time then prompt me at the end with suggestions of how to improve. Only do this where performance is significant delay.
+- When reproducing a reported bug via headless-browser instrumentation (e.g. the `playtest` skill), front-load a broad diagnostic snapshot (position, heading, health, game-over/win flags, etc.) on the first pass rather than adding fields reactively after each run — each run can cost real wall-clock time (browser launch + game boot + tens of seconds of simulated play), so under-instrumenting and re-running is far more expensive than capturing a few extra fields up front. Caught this after chasing a false lead for a whole iteration because an early snapshot omitted `health`/`gameOver`, which would have ruled it out immediately.
