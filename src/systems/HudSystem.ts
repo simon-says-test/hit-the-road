@@ -56,6 +56,7 @@ export class HudSystem {
   private weaponSidebarHighlight: Phaser.GameObjects.Graphics;
   private sidebarReloadBars: Phaser.GameObjects.Graphics;
   private sidebarAmmoTexts: Record<WeaponId, Phaser.GameObjects.Text>;
+  private restartButton: Phaser.GameObjects.Text;
 
   // Every screen-anchored (scrollFactor(0)) object this class owns, so
   // GameScene can exclude all of them from the zoomed/scrolling main camera
@@ -72,7 +73,7 @@ export class HudSystem {
   private sidebarX: number;
   private sidebarYStart: number;
 
-  constructor(scene: Phaser.Scene, highScore: number) {
+  constructor(scene: Phaser.Scene, highScore: number, onRestartRequested: () => void) {
     this.uiLayer = scene.add.layer();
     const origin = sidebarOrigin(scene.scale.width, scene.scale.height);
     this.sidebarX = origin.x;
@@ -115,7 +116,27 @@ export class HudSystem {
       .setOrigin(1, 0)
       .setDepth(DEPTHS.hud)
       .setScrollFactor(0);
-    this.uiLayer.add([this.healthText, this.scoreText, bestText, this.speedText, this.weaponText, this.aimText, this.raceDebugText]);
+    // Hidden until GameScene's stationary timer (see RESTART_BUTTON in
+    // config.ts) decides the player has actually stopped — see
+    // setRestartButtonVisible. Click/tap works natively via Phaser's pointer
+    // input (no separate touch path needed, unlike the joystick/sidebar,
+    // since there's no concurrent multi-touch concern here).
+    this.restartButton = scene.add
+      .text(scene.scale.width / 2, 16, "RESTART (R)", {
+        fontFamily: "monospace",
+        fontSize: "16px",
+        color: "#ffffff",
+        backgroundColor: "#cc3333",
+        padding: { x: 10, y: 6 },
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(DEPTHS.hud)
+      .setScrollFactor(0)
+      .setVisible(false)
+      .setInteractive({ useHandCursor: true });
+    this.restartButton.on("pointerdown", onRestartRequested);
+
+    this.uiLayer.add([this.healthText, this.scoreText, bestText, this.speedText, this.weaponText, this.aimText, this.raceDebugText, this.restartButton]);
 
     // World-anchored (no scrollFactor override) — these float near the
     // player/rivals in world space and must keep tracking the main camera's
@@ -161,8 +182,15 @@ export class HudSystem {
     return this.uiLayer;
   }
 
+  setRestartButtonVisible(visible: boolean): void {
+    this.restartButton.setVisible(visible);
+  }
+
   updateText(player: PlayerCar, distanceTraveled: number, forwardSpeed: number): void {
-    this.healthText.setText(`Health: ${Math.ceil(player.health)}`);
+    const healthLabel = player.isRepairing
+      ? `Health: ${Math.ceil(player.health)} (Repairing ${player.repairSecondsRemaining}s)`
+      : `Health: ${Math.ceil(player.health)}`;
+    this.healthText.setText(healthLabel);
     this.scoreText.setText(`Distance: ${Math.floor(distanceTraveled)} m`);
     this.speedText.setText(`Speed: ${Math.floor(forwardSpeed)}`);
 

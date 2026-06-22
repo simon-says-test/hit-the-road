@@ -1,9 +1,17 @@
 import Phaser from "phaser";
+import { GameMode } from "../config";
+
+const MODE_DESCRIPTIONS: Record<GameMode, string> = {
+  arcade: "Cars (including you) are destroyed at zero health.",
+  repair: "Cars stop to repair at zero health, resuming at half health.",
+};
 
 // Shown once, right after BootScene finishes loading — explains controls
 // before the player is dropped into traffic. Game-over restarts skip this
 // and go straight back into GameScene (see GameScene.endGame()), so it's a
 // one-time orientation, not a screen the player has to dismiss every run.
+// The mode toggle below always starts back on "arcade" on a fresh visit —
+// it's only carried across *restarts* within a session (see GameScene.init).
 export class IntroScene extends Phaser.Scene {
   constructor() {
     super("intro");
@@ -52,6 +60,42 @@ export class IntroScene extends Phaser.Scene {
       )
       .setOrigin(0.5);
 
+    // Mode toggle: defaults to "arcade" every time this screen is shown
+    // (i.e. every fresh page load — see the class comment), tap/click
+    // either button to switch before starting. Picked up once by
+    // scene.start's data below; GameScene.init carries it through any
+    // later in-session restarts on its own.
+    let mode: GameMode = "arcade";
+    const modeButtonStyle = { fontFamily: "monospace", fontSize: "15px", padding: { x: 12, y: 6 } };
+    const modeY = startY + lines.length * rowHeight + 75;
+
+    const arcadeBtn = this.add
+      .text(width / 2 - 95, modeY, "ARCADE", modeButtonStyle)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    const repairBtn = this.add
+      .text(width / 2 + 95, modeY, "REPAIR", modeButtonStyle)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    const modeDesc = this.add
+      .text(width / 2, modeY + 28, MODE_DESCRIPTIONS[mode], { fontFamily: "monospace", fontSize: "12px", color: "#999999" })
+      .setOrigin(0.5);
+
+    const refreshModeButtons = () => {
+      arcadeBtn.setStyle({ ...modeButtonStyle, backgroundColor: mode === "arcade" ? "#ffd166" : "#2a261c", color: mode === "arcade" ? "#16140f" : "#dddddd" });
+      repairBtn.setStyle({ ...modeButtonStyle, backgroundColor: mode === "repair" ? "#ffd166" : "#2a261c", color: mode === "repair" ? "#16140f" : "#dddddd" });
+      modeDesc.setText(MODE_DESCRIPTIONS[mode]);
+    };
+    refreshModeButtons();
+    arcadeBtn.on("pointerdown", () => {
+      mode = "arcade";
+      refreshModeButtons();
+    });
+    repairBtn.on("pointerdown", () => {
+      mode = "repair";
+      refreshModeButtons();
+    });
+
     const prompt = this.add
       .text(width / 2, height - 60, "Press SPACE or tap to start", {
         fontFamily: "monospace",
@@ -61,7 +105,18 @@ export class IntroScene extends Phaser.Scene {
       .setOrigin(0.5);
     this.tweens.add({ targets: prompt, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
 
-    this.input.keyboard!.once("keydown-SPACE", () => this.scene.start("game"));
-    this.input.once("pointerdown", () => this.scene.start("game"));
+    // Still "tap anywhere to start" (not just the prompt text) — except
+    // over the mode buttons themselves, which need their own tap-to-switch
+    // without also immediately starting the race on that same tap. SPACE
+    // has no such ambiguity, so it stays an unconditional global binding.
+    const start = () => this.scene.start("game", { mode });
+    let started = false;
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      if (started) return;
+      if (arcadeBtn.getBounds().contains(pointer.x, pointer.y) || repairBtn.getBounds().contains(pointer.x, pointer.y)) return;
+      started = true;
+      start();
+    });
+    this.input.keyboard!.once("keydown-SPACE", start);
   }
 }

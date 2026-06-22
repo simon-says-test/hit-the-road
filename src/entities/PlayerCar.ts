@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { computeDrive, PlayerDriveInput, PlayerDriveState } from "./playerPhysics";
 import { WeaponController, FireResult } from "./weapons";
-import { PLAYER_HEALTH, PLAYER_HANDLING, PICKUPS, WeaponId, CAR_SCALE, DEPTHS, DAMAGE_SLOW, WALLS, wallImpactDamage } from "../config";
+import { PLAYER_HEALTH, PLAYER_HANDLING, PICKUPS, WeaponId, CAR_SCALE, DEPTHS, DAMAGE_SLOW, WALLS, REPAIR_MODE, wallImpactDamage } from "../config";
 import { ignoreInUiCamera } from "../utils/cameraLayers";
 
 export type PlayerInput = PlayerDriveInput;
@@ -22,6 +22,12 @@ export class PlayerCar extends Phaser.Physics.Arcade.Image {
   // the rising edge (see drive()'s wall-impact handling), not every frame
   // of continued contact.
   private _wasAtWall = false;
+  // Set once by GameScene right after construction, from the mode chosen on
+  // IntroScene (see config.ts's GameMode) — false (arcade/destroy-at-zero)
+  // unless repair mode is active for this race.
+  private repairModeEnabled = false;
+  private _isRepairing = false;
+  private _repairTimer = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number, texture: string, headingDeg = 0) {
     super(scene, x, y, texture);
@@ -55,9 +61,34 @@ export class PlayerCar extends Phaser.Physics.Arcade.Image {
     return this._drifting;
   }
 
+  get isRepairing(): boolean {
+    return this._isRepairing;
+  }
+
+  get repairSecondsRemaining(): number {
+    return Math.ceil(this._repairTimer / 1000);
+  }
+
+  setRepairModeEnabled(enabled: boolean): void {
+    this.repairModeEnabled = enabled;
+  }
+
+  // Returns true if this hit should end the run (arcade mode, health
+  // reached 0). In repair mode, hitting 0 starts the forced-stop/repair
+  // sequence (see drive()) instead, and this always returns false — the car
+  // stays in play, just immobile for a bit.
   takeDamage(amount: number): boolean {
     this._health = Math.max(0, this._health - amount);
-    return this._health <= 0;
+    if (this._health > 0) return false;
+    if (this.repairModeEnabled) {
+      if (!this._isRepairing) {
+        this._isRepairing = true;
+        this._repairTimer = REPAIR_MODE.repairDurationMs;
+        this.setTint(0x888888);
+      }
+      return false;
+    }
+    return true;
   }
 
   heal(amount: number): void {
@@ -101,6 +132,21 @@ export class PlayerCar extends Phaser.Physics.Arcade.Image {
   // caller applies via setVelocity, since the car can now face/move in any
   // direction around the loop, not just drift sideways on a fixed lane.
   drive(input: PlayerInput, delta: number): number {
+    // Forced stop while repairing (repair mode only — see takeDamage):
+    // input/physics/weapons are all skipped, same idea as a real breakdown.
+    // Resumes at half health once the timer runs out.
+    if (this._isRepairing) {
+      this._repairTimer -= delta;
+      this.driveState.forwardSpeed = 0;
+      this.setVelocity(0, 0);
+      if (this._repairTimer <= 0) {
+        this._isRepairing = false;
+        this._health = PLAYER_HEALTH.max * REPAIR_MODE.healthRestoreFraction;
+        this.clearTint();
+      }
+      return 0;
+    }
+
     if (this.speedBoostTimer > 0) this.speedBoostTimer -= delta;
     if (this.damageSlowTimer > 0) this.damageSlowTimer -= delta;
 
@@ -125,9 +171,10 @@ export class PlayerCar extends Phaser.Physics.Arcade.Image {
     this.setVelocity(result.vx, result.vy);
     this.setRotation((result.headingDeg * Math.PI) / 180);
 
-    if (this._isOffRoad) {
-      this.takeDamage(PLAYER_HEALTH.offroadDamagePerSecond * (delta / 1000));
-    }
+    // Off-road (the dirt shoulder between the paved edge and the canyon
+    // wall) only ever slows the car (offroadDrag, applied in computeDrive)
+    // — no health cost. Only the canyon wall itself (the hard, impassable
+    // boundary beyond the shoulder) damages on impact, below.
     // One-time damage + speed cut on the frame contact begins, not per
     // second of continued contact — see wallImpactDamage in config.ts. The
     // speed cut applies on top of (not instead of) the wall's own continuous

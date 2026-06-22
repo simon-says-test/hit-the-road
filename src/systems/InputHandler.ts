@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { PlayerInput } from "../entities/PlayerCar";
 import { WeaponId } from "../config";
 
-type KeyName = "W" | "S" | "A" | "D" | "UP" | "DOWN" | "LEFT" | "RIGHT" | "SHIFT" | "SPACE";
+type KeyName = "W" | "S" | "A" | "D" | "UP" | "DOWN" | "LEFT" | "RIGHT" | "SHIFT" | "SPACE" | "R";
 
 // Per-frame track/hazard context GameScene already has to compute itself
 // (wall clamping, the explicit hazard-overlap check) — not something input
@@ -37,6 +37,7 @@ export class InputHandler {
       RIGHT: kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
       SHIFT: kb.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT),
       SPACE: kb.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
+      R: kb.addKey("R"),
     };
     kb.on("keydown-ONE", () => onWeaponSelect("rocket"));
     kb.on("keydown-TWO", () => onWeaponSelect("sideguns"));
@@ -56,5 +57,12 @@ export class InputHandler {
 
   isFirePressed(): boolean {
     return this.keys.SPACE.isDown;
+  }
+
+  // JustDown (not isDown) so holding R through a scene restart can't
+  // immediately re-trigger another restart on the new scene's first frame —
+  // see GameScene's mid-race restart button for the gating this feeds into.
+  isRestartJustPressed(): boolean {
+    return Phaser.Input.Keyboard.JustDown(this.keys.R);
   }
 }

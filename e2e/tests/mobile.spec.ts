@@ -21,8 +21,10 @@ async function startMobileGame(page: Page, seed: number = DEFAULT_SEED) {
   await page.waitForSelector('#app canvas', { timeout: 20000 });
   // IntroScene dismisses on pointerdown same as Space — use a touch tap
   // (not keyboard) so this also exercises the intro screen's touch path.
-  // Center of the 600x960 canvas — clear of every UI zone below.
-  await touchTap(page, 300, 480);
+  // Below the arcade/repair mode-toggle buttons (the one tappable zone on
+  // this screen "tap anywhere to start" deliberately excludes) and above
+  // the start prompt, on the 600x960 canvas.
+  await touchTap(page, 300, 800);
   await page.waitForFunction(() => !!(window as any).__GAME_STATE__, null, { timeout: 20000 });
 }
 
@@ -165,16 +167,22 @@ test('turret can be aimed and fired by a second finger while the joystick is hel
 test('restarting after game over leaves touch controls working (no leaked camera/listener state)', async ({ page }) => {
   await startMobileGame(page);
 
-  // Same pulsed ram-into-wall technique core.spec.ts's gameOver test uses.
+  // Same short-ram-pulse-then-straight-recovery technique core.spec.ts's
+  // gameOver test uses — see that test's comment for why a single long-held
+  // steer no longer reliably ends the run (it can wedge the car heading-
+  // first into the wall at ~0 speed, which off-road+wall drag together
+  // outpace both forward and reverse acceleration on their own).
+  test.setTimeout(90_000);
+  await page.keyboard.down('w');
   let state = await getState(page);
-  for (let i = 0; i < 80 && !state.gameOver; i++) {
-    await page.keyboard.down('w');
+  for (let i = 0; i < 60 && !state.gameOver; i++) {
     await page.keyboard.down('a');
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(250);
     await page.keyboard.up('a');
-    await page.keyboard.up('w');
+    await page.waitForTimeout(500);
     state = await getState(page);
   }
+  await page.keyboard.up('w');
   expect(state.gameOver).toBe(true);
 
   await touchTap(page, 300, 480); // restart (dual-path: Space or tap)

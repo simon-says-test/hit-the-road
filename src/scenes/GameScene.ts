@@ -43,6 +43,8 @@ import {
   FINISH_LINE,
   PLAYER_HANDLING,
   CAMERA,
+  RESTART_BUTTON,
+  GameMode,
 } from "../config";
 
 const HIGH_SCORE_STORAGE_KEY = "hit-the-road:best-distance";
@@ -103,6 +105,15 @@ export class GameScene extends Phaser.Scene {
   private won = false;
   private highScore = 0;
 
+  // Chosen once on IntroScene, carried through every restart this session
+  // (game over, finish, and the mid-race restart button) via the data
+  // passed to scene.start/restart — see config.ts's GameMode and IntroScene.
+  private mode: GameMode = "arcade";
+  // Ms the player's speed has been at/under RESTART_BUTTON.stationarySpeedThreshold,
+  // continuously — drives the mid-race restart button's visibility (see
+  // update()). Reset to 0 the instant speed climbs back above the threshold.
+  private stationaryTimer = 0;
+
   private overlay!: Phaser.GameObjects.Container;
 
   // A second, never-zoomed/never-scrolled camera dedicated to screen-
@@ -117,6 +128,16 @@ export class GameScene extends Phaser.Scene {
     super("game");
   }
 
+  // Called by Phaser before every create() — both the initial scene.start
+  // from IntroScene and every in-session scene.restart (game over, finish,
+  // mid-race restart button). data.mode is omitted from some restart call
+  // sites; falling back to this.mode (not "arcade") is what keeps the
+  // chosen mode across those restarts, since this Scene instance — and its
+  // field values — persists across restart() the way IntroScene wouldn't.
+  init(data?: { mode?: GameMode }): void {
+    this.mode = data?.mode ?? this.mode;
+  }
+
   create(): void {
     this.distanceTraveled = 0;
     this.gameOver = false;
@@ -124,6 +145,7 @@ export class GameScene extends Phaser.Scene {
     this.onRoughTerrain = false;
     this.oilSlickTimer = 0;
     this.oilDriftBias = 0;
+    this.stationaryTimer = 0;
     this.cameraLookAhead = { x: 0, y: 0 };
     this.highScore = Number(localStorage.getItem(HIGH_SCORE_STORAGE_KEY) ?? 0);
 
@@ -144,6 +166,7 @@ export class GameScene extends Phaser.Scene {
     const start = pointAt(this.track, 0);
     const startHeadingDeg = (start.headingRad * 180) / Math.PI;
     this.player = new PlayerCar(this, start.x, start.y, "car-player", startHeadingDeg);
+    this.player.setRepairModeEnabled(this.mode === "repair");
 
     const bounds = this.track.bounds;
     this.physics.world.setBounds(bounds.minX, bounds.minY, bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
@@ -170,7 +193,7 @@ export class GameScene extends Phaser.Scene {
 
     this.pickupSystem = new PickupSystem(this, this.track, this.rng);
     this.collisionHandler = new CollisionHandler();
-    this.hud = new HudSystem(this, this.highScore);
+    this.hud = new HudSystem(this, this.highScore, () => this.tryMidRaceRestart());
     this.inputHandler = new InputHandler(this, (weapon) => this.player.selectWeapon(weapon));
     this.touchControls = new TouchControls(this, (weapon) => this.player.selectWeapon(weapon));
     // Screen-anchored HUD/touch-control graphics render via uiCamera instead
@@ -249,6 +272,7 @@ export class GameScene extends Phaser.Scene {
       const car = this.enemies.get(x, y, archetype.texture) as EnemyCar | null;
       if (!car) continue;
       car.spawn(archetype, x, y, headingDeg);
+      car.repairModeEnabled = this.mode === "repair";
       this.raceTracker.addRival(car, x, y);
     }
   }
@@ -459,6 +483,7 @@ export class GameScene extends Phaser.Scene {
     const forwardSpeed = this.player.drive(input, delta);
     if (this.oilSlickTimer > 0) this.oilSlickTimer -= delta;
     this.raceTracker.updatePlayerS(trackQuery.s);
+    this.updateMidRaceRestart(forwardSpeed, delta);
 
     this.handleFiring();
     this.touchControls.update(this.player.weapons.current);
@@ -477,11 +502,38 @@ export class GameScene extends Phaser.Scene {
     this.updateRaceDebugText();
     this.updateE2EGameState(forwardSpeed);
 
-    if (this.player.health <= 0) {
+    if (this.player.health <= 0 && !this.player.isRepairing) {
       this.endGame();
     } else if (this.raceTracker.hasPlayerFinished()) {
       this.finishRace();
     }
+  }
+
+  // Surfaces the HUD's RESTART button (and accepts the R key) only once the
+  // player has been at/near a stop for RESTART_BUTTON.stationaryDurationMs
+  // — see config.ts for why this is gated on stationary time rather than
+  // available at any moment during normal driving.
+  private updateMidRaceRestart(forwardSpeed: number, delta: number): void {
+    if (Math.abs(forwardSpeed) <= RESTART_BUTTON.stationarySpeedThreshold) {
+      this.stationaryTimer += delta;
+    } else {
+      this.stationaryTimer = 0;
+    }
+    const eligible = this.stationaryTimer >= RESTART_BUTTON.stationaryDurationMs;
+    this.hud.setRestartButtonVisible(eligible);
+    if (eligible && this.inputHandler.isRestartJustPressed()) {
+      this.tryMidRaceRestart();
+    }
+  }
+
+  // Shared by the HUD button's click handler and the R key — both only act
+  // while the button is actually showing (see updateMidRaceRestart), and
+  // mode is carried forward explicitly so a mid-race restart doesn't fall
+  // back to arcade.
+  private tryMidRaceRestart(): void {
+    if (this.gameOver || this.won) return;
+    if (this.stationaryTimer < RESTART_BUTTON.stationaryDurationMs) return;
+    this.scene.restart({ mode: this.mode });
   }
 
   // Unlike the continuous rough/oil patches, this fires once per overlap
@@ -619,6 +671,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleFiring(): void {
+    if (this.player.isRepairing) return;
     const weapon = this.player.weapons.current;
     if (weapon === "turret") {
       // Resolved through TouchControls rather than reading
@@ -865,8 +918,8 @@ export class GameScene extends Phaser.Scene {
     best.setText(isNewBest ? "New Best!" : `Best: ${this.highScore} m`);
     this.overlay.setVisible(true);
 
-    this.input.keyboard!.once("keydown-SPACE", () => this.scene.restart());
-    this.input.once("pointerdown", () => this.scene.restart());
+    this.input.keyboard!.once("keydown-SPACE", () => this.scene.restart({ mode: this.mode }));
+    this.input.once("pointerdown", () => this.scene.restart({ mode: this.mode }));
   }
 
   private buildOverlay(): Phaser.GameObjects.Container {

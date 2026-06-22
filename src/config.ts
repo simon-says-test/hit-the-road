@@ -118,7 +118,6 @@ export const PLAYER_HANDLING = {
 
 export const PLAYER_HEALTH = {
   max: 100,
-  offroadDamagePerSecond: 6,
 };
 
 export const DRIFT = {
@@ -768,6 +767,34 @@ export const HEALTH_BAR = {
   width: 28,
   height: 4,
   offsetY: 8,
+};
+
+// Lets a mid-race restart (R key or the on-screen button) only surface once
+// the player has actually stopped, rather than being available — and
+// mis-tappable — at any moment during normal driving. "Stationary" is a
+// small speed threshold rather than exactly 0 so coming to rest still
+// counts even with residual coast-friction creep.
+export const RESTART_BUTTON = {
+  stationarySpeedThreshold: 20,
+  stationaryDurationMs: 3000,
+};
+
+// Selected once on IntroScene (defaults to "arcade" on every fresh page
+// load — see IntroScene) and carried through GameScene's own restarts (game
+// over, finish, and the mid-race RESTART_BUTTON) via scene restart data, so
+// switching modes requires going back through IntroScene, but dying/
+// restarting mid-session doesn't silently drop back to the other mode.
+export type GameMode = "arcade" | "repair";
+
+// "repair" mode's alternative to destruction: a car (player or rival) that
+// hits 0 health is held immobile for repairDurationMs — still able to take
+// further damage, just unable to drive or fire — then resumes at
+// healthRestoreFraction of its max health instead of being destroyed/ending
+// the run. "arcade" mode is the original destroy-at-zero behavior, unaffected
+// by these values.
+export const REPAIR_MODE = {
+  repairDurationMs: 3000,
+  healthRestoreFraction: 0.5,
 };
 
 // Standalone ammo/health pickups that spawn on a timer, independent of

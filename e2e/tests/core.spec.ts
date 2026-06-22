@@ -142,17 +142,29 @@ test('a given seed reproduces the same track and rival start layout', async ({ b
 // `gameOver: false` even though the run had actually ended. A test (or a
 // player) polling for "did the run end" would hang/false-negative forever.
 test('gameOver becomes observable in game state once the player is destroyed', async ({ page }) => {
-  // Repeatedly ramming straight into a wall is a reliable way to end the
-  // run without depending on rival AI/projectiles.
-  for (let i = 0; i < 40; i++) {
-    await page.keyboard.down('w');
+  // Wall-impact damage is a one-time hit on the *rising edge* of contact
+  // (see WALLS in config.ts), and off-road driving itself no longer costs
+  // health at all — so reliably ending the run means repeated short ram
+  // pulses (just long enough to register one rising-edge hit at speed),
+  // each followed by a longer straight recovery with no steering at all to
+  // rebuild speed. A *held* steer (no recovery gap) instead keeps rotating
+  // the heading further into the wall every cycle, which can wedge the car
+  // heading-first into the wall at ~0 speed — off-road and wall drag
+  // together (config.ts WALLS.dragPerSecondPlayer + PLAYER_HANDLING.offroadDrag)
+  // exceed both forward and reverse acceleration, so a car stalled exactly
+  // at the wall boundary can't out-accelerate its way back onto the road on
+  // its own (this is what the mid-race RESTART button is for, in practice).
+  test.setTimeout(90_000);
+  await page.keyboard.down('w');
+  for (let i = 0; i < 60; i++) {
     await page.keyboard.down('a');
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(250);
     await page.keyboard.up('a');
-    await page.keyboard.up('w');
+    await page.waitForTimeout(500);
     const state = await getState(page);
     if (state.gameOver) break;
   }
+  await page.keyboard.up('w');
   const state = await getState(page);
   expect(state.gameOver).toBe(true);
   expect(state.player.health).toBe(0);

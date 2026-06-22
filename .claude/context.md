@@ -78,7 +78,11 @@ Zoom (`CAMERA.zoom`/`mobileZoom`) set once in `create()`; per-frame look-ahead o
 
 ## Impact feel (tuned to favor speed-loss over raw damage)
 
-Three independent impact paths, all in `config.ts`: `OBSTACLES` (small rocks — one-time bump, despawns), `COLLISION_SHUNT` (ramming — closing-speed-derived shunt + enemy damage), `WALLS.impactSpeedPenaltyFactor` (one-time speed cut on the same rising edge as the existing one-time wall damage, on top of the wall's continuous scraping drag). Obstacle texture size is driven entirely by `OBSTACLES.size` — no other hardcoded pixel value or physics-body size to keep in sync.
+Three independent impact paths, all in `config.ts`: `OBSTACLES` (small rocks — one-time bump, despawns), `COLLISION_SHUNT` (ramming — closing-speed-derived shunt + enemy damage), `WALLS.impactSpeedPenaltyFactor` (one-time speed cut on the same rising edge as the existing one-time wall damage, on top of the wall's continuous scraping drag). Obstacle texture size is driven entirely by `OBSTACLES.size` — no other hardcoded pixel value or physics-body size to keep in sync. **Off-road (the shoulder short of the wall) is drag-only, never a health cost** — the canyon wall itself is the only terrain that damages on contact.
+
+## Game modes (`GameMode`, `config.ts`) and the mid-race restart button
+
+`"arcade"` (destroy-at-zero, default) vs `"repair"` (zero health → forced stop + `REPAIR_MODE` timer → resume at half health, no destruction) — chosen once on `IntroScene`, carried through every `scene.restart()` this session via `GameScene.init(data)` falling back to its own `this.mode` field. Lives entirely inside `PlayerCar`/`EnemyCar.takeDamage()` (returns `false` instead of the destroyed/`true` signal when repairing) and the top of `drive()` (forced-stop branch) — every existing kill-handling call site (`CollisionHandler`, `GameScene.damagePlayer`/`endGame`) is unchanged, since they already just branch on `takeDamage`'s boolean. See high-level-design.md's "Game modes" section for the full reasoning, including the mid-race RESTART button (HUD + `R` key, gated on `GameScene.stationaryTimer`, independent of `GameMode`).
 
 ## Testing — commands & gotchas
 

@@ -1,6 +1,18 @@
 import Phaser from "phaser";
 import { computeTargetHeading, turnTowardHeading, curvatureSpeedFactor } from "./enemyBehaviors";
-import { EnemyArchetypeConfig, CAR_SCALE, DEPTHS, COLLISION_SHUNT, DAMAGE_SLOW, WALLS, ROUGH_TERRAIN, OIL_SLICK, ENEMY_AI, wallImpactDamage } from "../config";
+import {
+  EnemyArchetypeConfig,
+  CAR_SCALE,
+  DEPTHS,
+  COLLISION_SHUNT,
+  DAMAGE_SLOW,
+  WALLS,
+  ROUGH_TERRAIN,
+  OIL_SLICK,
+  ENEMY_AI,
+  REPAIR_MODE,
+  wallImpactDamage,
+} from "../config";
 import { ignoreInUiCamera } from "../utils/cameraLayers";
 
 export interface NearestRival {
@@ -59,6 +71,12 @@ export class EnemyCar extends Phaser.Physics.Arcade.Image {
   // see ENEMY_AI.shooterFireRangePx for why a shooter shouldn't fire at any
   // distance.
   distanceToPlayer = 0;
+  // Set by GameScene.spawnRivals from the race's chosen GameMode (see
+  // config.ts) — false (arcade/destroy-at-zero) unless repair mode is
+  // active for this race.
+  repairModeEnabled = false;
+  isRepairing = false;
+  repairTimer = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number, texture: string) {
     super(scene, x, y, texture);
@@ -81,6 +99,9 @@ export class EnemyCar extends Phaser.Physics.Arcade.Image {
     this.oilDriftBias = 0;
     this.wasAtWall = false;
     this.distanceToPlayer = 0;
+    this.repairModeEnabled = false;
+    this.isRepairing = false;
+    this.repairTimer = 0;
     this.heading = headingDeg;
     this.setTexture(archetype.texture);
     this.setPosition(x, y);
@@ -90,9 +111,22 @@ export class EnemyCar extends Phaser.Physics.Arcade.Image {
     this.setTint(archetype.tint);
   }
 
+  // Returns true if this hit should destroy the car (arcade mode, health
+  // reached 0). In repair mode, hitting 0 starts the forced-stop/repair
+  // sequence (see drive()) instead, and this always returns false.
   takeDamage(amount: number): boolean {
     this.health -= amount;
-    return this.health <= 0;
+    if (this.health > 0) return false;
+    this.health = 0;
+    if (this.repairModeEnabled) {
+      if (!this.isRepairing) {
+        this.isRepairing = true;
+        this.repairTimer = REPAIR_MODE.repairDurationMs;
+        this.setTint(0x888888);
+      }
+      return false;
+    }
+    return true;
   }
 
   // Lap-completion top-up (see LAP_HEALTH_BONUS) — clamped to the
@@ -115,6 +149,21 @@ export class EnemyCar extends Phaser.Physics.Arcade.Image {
   drive(params: EnemyDriveParams): boolean {
     const { baseApproachSpeed, rubberBandMultiplier, playerX, playerY, delta, lookaheadHeadingDeg, lateralOffset, leftWallDist, rightWallDist, rival } =
       params;
+
+    // Forced stop while repairing (repair mode only — see takeDamage): no
+    // AI movement/firing, same idea as PlayerCar's breakdown. Resumes at
+    // half health once the timer runs out.
+    if (this.isRepairing) {
+      this.repairTimer -= delta;
+      this.setVelocity(0, 0);
+      if (this.repairTimer <= 0) {
+        this.isRepairing = false;
+        this.health = this.archetype.health * REPAIR_MODE.healthRestoreFraction;
+        this.setTint(this.archetype.tint);
+      }
+      return false;
+    }
+
     const dtSeconds = delta / 1000;
     if (this.damageSlowTimer > 0) {
       this.damageSlowTimer = Math.max(0, this.damageSlowTimer - delta);
@@ -207,7 +256,7 @@ export class EnemyCar extends Phaser.Physics.Arcade.Image {
   }
 
   canFire(): boolean {
-    return this.archetype.fireCooldown > 0 && this.fireTimer <= 0 && this.distanceToPlayer <= ENEMY_AI.shooterFireRangePx;
+    return !this.isRepairing && this.archetype.fireCooldown > 0 && this.fireTimer <= 0 && this.distanceToPlayer <= ENEMY_AI.shooterFireRangePx;
   }
 
   resetFireTimer(): void {
